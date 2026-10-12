@@ -407,6 +407,17 @@ class CustomCategoryTests(TestCase):
         g = self.client.get('/api/state/')
         self.assertEqual(g.json()['data']['customCategories']['c_pets']['label'], 'Pets')
 
+    def test_bill_match_key_pass_through(self):
+        doc = {'appName': 'B', 'budgets': {}, 'bills': [
+            {'id': 1, 'name': 'Netflix', 'amount': 15.49, 'dueDate': '2026-10-05', 'category': 'subscriptions',
+             'status': 'pending', 'recurring': True, 'isPayoff': False, 'totalOwed': 0, 'paidAmount': 0,
+             'payments': [], 'notes': '', 'matchKey': 'netflix'},
+        ], 'accounts': []}
+        r = self.client.put('/api/state/', data=json.dumps(doc), content_type='application/json')
+        self.assertEqual(r.status_code, 200)
+        g = self.client.get('/api/state/')
+        self.assertEqual(g.json()['data']['bills'][0]['matchKey'], 'netflix')
+
     def test_custom_categories_can_be_cleared(self):
         doc = {'appName': 'B', 'budgets': {}, 'bills': [], 'accounts': [],
                'customCategories': {'c_pets': {'label': 'Pets', 'icon': 'fa-paw', 'color': 'pink'}}}

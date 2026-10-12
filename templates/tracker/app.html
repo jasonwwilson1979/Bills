@@ -1032,6 +1032,37 @@
         </div>
     </div>
 
+    <!-- TAG AS BILL MODAL -->
+    <div class="modal-overlay" id="tagBillModal">
+        <div class="modal" style="width:470px;">
+            <div class="modal-header"><h3 class="modal-title"><i class="fas fa-tag" style="color:var(--accent-blue);margin-right:8px;"></i>Tag as bill</h3><button class="modal-close" onclick="closeTagBillModal()"><i class="fas fa-times"></i></button></div>
+            <div class="modal-body" style="max-height:65vh;overflow-y:auto;">
+                <div style="background:var(--bg-input);border-radius:var(--radius-sm);padding:12px;margin-bottom:16px;font-size:13px;">
+                    <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" id="tagBillDesc"></div>
+                    <div style="color:var(--text-muted);"><span id="tagBillDate"></span> · <span id="tagBillAmount"></span></div>
+                </div>
+                <div class="filter-tabs" style="margin-bottom:14px;">
+                    <button class="filter-tab active" id="tagModeNewBtn" onclick="setTagMode('new', this)">Create new bill</button>
+                    <button class="filter-tab" id="tagModeExistBtn" onclick="setTagMode('existing', this)">Link to existing bill</button>
+                </div>
+                <div id="tagNewPanel">
+                    <div class="form-group"><label class="form-label">Bill name</label><input type="text" class="form-input" id="tagNewName" maxlength="60"></div>
+                    <div class="form-row">
+                        <div class="form-group"><label class="form-label">Amount ($/mo)</label><input type="number" class="form-input" id="tagNewAmount" step="0.01" min="0"></div>
+                        <div class="form-group"><label class="form-label">Category</label><select class="form-select" id="tagNewCategory"></select></div>
+                    </div>
+                    <div class="toggle-group" style="margin-bottom:10px;"><div class="toggle active" id="tagNewRecurring" onclick="this.classList.toggle('active')"></div><span class="toggle-label">Recurring — watch for it on future imports</span></div>
+                </div>
+                <div id="tagExistPanel" style="display:none;">
+                    <div class="form-group"><label class="form-label">Choose bill</label><select class="form-select" id="tagExistSelect"></select></div>
+                    <p style="font-size:12px;color:var(--text-muted);">This transaction will be recorded as a payment on that bill.</p>
+                </div>
+                <p style="font-size:12px;color:var(--text-muted);">Match signature: <b id="tagBillMatchKey"></b> — future bank imports with the same description will automatically be recorded against this bill.</p>
+            </div>
+            <div class="modal-footer"><button class="btn btn-secondary" onclick="closeTagBillModal()">Cancel</button><button class="btn btn-pay" onclick="applyTagBill()"><i class="fas fa-check"></i> Save</button></div>
+        </div>
+    </div>
+
     <!-- ACCOUNT WITHDRAWALS MODAL -->
     <div class="modal-overlay" id="withdrawalsModal">
         <div class="modal" style="width:700px;">
@@ -1047,6 +1078,7 @@
                         <button class="filter-tab" onclick="sortActivity('amount', this)">By Amount</button>
                     </div>
                 </div>
+                <div style="margin-bottom:20px;"><input type="search" class="form-input" id="activitySearch" placeholder="🔍 Search this account's activity…" style="width:100%;" oninput="activitySearchChanged(this.value)"></div>
                 <div id="withdrawalsSummary" style="margin-bottom:20px;padding:16px;background:var(--bg-card);border-radius:var(--radius-md);border:1px solid var(--border-color);"></div>
                 <div id="withdrawalsList"></div>
             </div>
@@ -1766,6 +1798,8 @@
         let currentWithdrawalAccountId = null;
         let activityYear = 'all';
         let activitySort = 'date';
+        let activitySearch = '';
+        let currentActivityRows = [];
 
         function getAllAccountWithdrawals(accountId) {
             const withdrawals = [];
@@ -1791,7 +1825,7 @@
             const rows = [];
             const acc = accounts.find(a => a.id === accountId);
             (acc && acc.deposits ? acc.deposits : []).forEach(d => rows.push({ date: d.date, amount: d.amount, type: 'in', source: 'deposit', label: d.note || 'Deposit', billName: '', category: '', note: d.note || '' }));
-            (acc && acc.debits ? acc.debits : []).forEach(d => rows.push({ date: d.date, amount: d.amount, type: 'out', source: 'bank', label: d.note || 'Bank transaction', billName: '', category: '', note: d.note || '' }));
+            (acc && acc.debits ? acc.debits : []).forEach(d => rows.push({ date: d.date, amount: d.amount, type: 'out', source: 'bank', label: d.note || 'Bank transaction', billName: '', category: '', note: d.note || '', matchKey: d.matchKey || '' }));
             bills.forEach(bill => (bill.payments || []).forEach(p => {
                 if (p.accountId === accountId) rows.push({ date: p.date, amount: p.amount, type: 'out', source: 'bill', label: bill.name, billName: bill.name, category: bill.category, note: p.note || '' });
             }));
@@ -1824,8 +1858,12 @@
 
             let activity = getAllAccountActivity(account.id);
             if (activityYear !== 'all') activity = activity.filter(r => (r.date || '').slice(0, 4) === activityYear);
+            const q = activitySearch.trim().toLowerCase();
+            if (q) activity = activity.filter(r => ((r.label || '') + ' ' + (r.note || '')).toLowerCase().includes(q));
             if (activitySort === 'date') activity.sort((a, b) => (a.date < b.date ? 1 : -1));
             else activity.sort((a, b) => b.amount - a.amount);
+            activity.forEach((r, i) => { r._i = i; });
+            currentActivityRows = activity;
 
             const inflow = activity.filter(r => r.type === 'in').reduce((s, r) => s + r.amount, 0);
             const outflow = activity.filter(r => r.type === 'out').reduce((s, r) => s + r.amount, 0);
@@ -1865,13 +1903,15 @@
                             <div style="width:32px;height:32px;border-radius:var(--radius-sm);background:${isIn ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)'};display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fas ${isIn ? 'fa-arrow-down' : 'fa-arrow-up'}" style="font-size:11px;color:${isIn ? 'var(--accent-green)' : 'var(--accent-red)'};"></i></div>
                             <div style="min-width:0;"><div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${bfEscapeHtml(r.label)}</div><div style="font-size:11px;color:var(--text-muted);">${formatDate(r.date)}${r.note && r.note !== r.label ? ' · ' + bfEscapeHtml(r.note) : ''}${!isIn && cat ? ` · <span class="category-tag ${cat.class}">${cat.label}</span>` : ''}</div></div>
                         </div>
-                        <div style="text-align:right;flex-shrink:0;"><div style="font-size:14px;font-weight:700;color:${isIn ? 'var(--accent-green)' : 'var(--text-primary)'};">${isIn ? '+' : '-'}${formatCurrency(r.amount)}</div><div style="font-size:10px;color:var(--text-muted);">${r.source === 'deposit' ? 'Deposit' : r.source === 'bank' ? 'Bank transaction' : 'Bill payment'}</div></div>
+                        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;"><div style="text-align:right;"><div style="font-size:14px;font-weight:700;color:${isIn ? 'var(--accent-green)' : 'var(--text-primary)'};">${isIn ? '+' : '-'}${formatCurrency(r.amount)}</div><div style="font-size:10px;color:var(--text-muted);">${r.source === 'deposit' ? 'Deposit' : r.source === 'bank' ? 'Bank transaction' : 'Bill payment'}</div></div>${r.source === 'bank' ? `<button class="btn btn-secondary btn-sm" onclick="openTagBillModal(${r._i})" title="Tag as bill"><i class="fas fa-tag"></i></button>` : ''}</div>
                     </div>`;
                 });
                 html += '</div>';
             });
 
-            document.getElementById('withdrawalsList').innerHTML = html || '<div class="empty-state" style="padding:40px 20px;"><i class="fas fa-check-circle" style="font-size:32px;"></i><h3>No activity yet</h3><p>Deposits and bill payments on this account will appear here.</p></div>';
+            document.getElementById('withdrawalsList').innerHTML = html || (q
+                ? '<div class="empty-state" style="padding:40px 20px;"><i class="fas fa-magnifying-glass" style="font-size:32px;"></i><h3>No matches</h3><p>Nothing matches your search in this view.</p></div>'
+                : '<div class="empty-state" style="padding:40px 20px;"><i class="fas fa-check-circle" style="font-size:32px;"></i><h3>No activity yet</h3><p>Deposits and bill payments on this account will appear here.</p></div>');
         }
 
         function openWithdrawalsModal(accountId) {
@@ -1879,7 +1919,8 @@
             const account = accounts.find(a => a.id === accountId);
             if (!account) return;
             document.getElementById('withdrawalsModalTitle').textContent = `${account.name} — Activity`;
-            activityYear = 'all'; activitySort = 'date';
+            activityYear = 'all'; activitySort = 'date'; activitySearch = '';
+            document.getElementById('activitySearch').value = '';
             renderWithdrawalYearTabs(); renderWithdrawalsList();
             document.getElementById('withdrawalsModal').classList.add('active');
         }
@@ -2535,9 +2576,10 @@
                     const amt = parseAmountValue(get(row, 'amount')), typeS = String(get(row, 'type') || '').toLowerCase();
                     if (amt !== null) { if (amt < 0) debit = -amt; else if (typeS.includes('debit') || typeS.includes('withdrawal')) debit = Math.abs(amt); else credit = Math.abs(amt); }
                 }
-                let note = String(get(row, 'description') || '').trim() || 'Bank transaction';
+                const desc = String(get(row, 'description') || '').trim();
+                let note = desc || 'Bank transaction';
                 if (chk) note = ('#' + chk + ' · ' + note).slice(0, 80);
-                if (date && (debit > 0.005 || credit > 0.005)) out.push({ date, note, debit: Math.round(debit * 100) / 100, credit: Math.round(credit * 100) / 100, balance: (balance === null || isNaN(balance)) ? null : Math.round(balance * 100) / 100 });
+                if (date && (debit > 0.005 || credit > 0.005)) out.push({ date, note, desc, debit: Math.round(debit * 100) / 100, credit: Math.round(credit * 100) / 100, balance: (balance === null || isNaN(balance)) ? null : Math.round(balance * 100) / 100 });
             });
             return out;
         }
@@ -2546,6 +2588,7 @@
             const inT = rows.reduce((s, r) => s + r.credit, 0), outT = rows.reduce((s, r) => s + r.debit, 0);
             const balRows = rows.filter(r => r.balance !== null);
             bankImportData.finalBalance = balRows.length ? balRows[balRows.length - 1].balance : null;
+            const autoLink = rows.filter(r => { const mk = descMatchKey(r.desc || r.note); return mk && bills.some(b => b.recurring && b.matchKey === mk); });
             const span = rows.length ? `${formatDate(rows[0].date)} → ${formatDate(rows[rows.length - 1].date)}` : '—';
             const cell = 'text-align:center;padding:10px;background:var(--bg-input);border-radius:var(--radius-sm);';
             document.getElementById('bankImportSummary').innerHTML = `<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
@@ -2553,9 +2596,9 @@
                 <div style="${cell}"><div style="font-size:11px;color:var(--text-muted);">Credits (in)</div><div style="font-size:16px;font-weight:800;color:var(--accent-green);">+${formatCurrency(inT)}</div></div>
                 <div style="${cell}"><div style="font-size:11px;color:var(--text-muted);">Debits (out)</div><div style="font-size:16px;font-weight:800;color:var(--accent-red);">-${formatCurrency(outT)}</div></div>
                 <div style="${cell}"><div style="font-size:11px;color:var(--text-muted);">Statement balance</div><div style="font-size:16px;font-weight:800;color:var(--accent-blue);">${bankImportData.finalBalance === null ? 'n/a' : formatCurrency(bankImportData.finalBalance)}</div></div></div>
-                <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0;">Span: ${span}. Credits become deposits, debits become bank transactions; duplicates and debits matching an existing bill payment are skipped.${bankImportData.finalBalance === null ? ' No Balance column — amounts apply on top of the current balance.' : ` Balance will be set to the statement balance (${formatCurrency(bankImportData.finalBalance)}).`}</p>`;
+                <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0;">Span: ${span}. Credits become deposits, debits become bank transactions; duplicates and debits matching an existing bill payment are skipped.${autoLink.length ? ` <b style="color:var(--accent-blue);">${autoLink.length} row(s) will auto-pay existing bills.</b>` : ''}${bankImportData.finalBalance === null ? ' No Balance column — amounts apply on top of the current balance.' : ` Balance will be set to the statement balance (${formatCurrency(bankImportData.finalBalance)}).`}</p>`;
             const tail = rows.slice(-30).reverse();
-            document.getElementById('bankImportPreview').innerHTML = rows.length ? `<table class="bank-table"><thead><tr><th>Date</th><th>Description</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead><tbody>${tail.map(r => `<tr><td>${formatDate(r.date)}</td><td class="clip">${bfEscapeHtml(r.note)}</td><td style="color:var(--accent-red);">${r.debit ? formatCurrency(r.debit) : ''}</td><td style="color:var(--accent-green);">${r.credit ? formatCurrency(r.credit) : ''}</td><td>${r.balance === null ? '' : formatCurrency(r.balance)}</td></tr>`).join('')}</tbody></table><p style="font-size:11px;color:var(--text-muted);margin:6px 0 0;">Showing the ${Math.min(30, rows.length)} most recent of ${rows.length} row(s).</p>` : '<p style="color:var(--accent-red);font-size:13px;">No rows with a valid date and amount were found — check the column mapping above.</p>';
+            document.getElementById('bankImportPreview').innerHTML = rows.length ? `<table class="bank-table"><thead><tr><th>Date</th><th>Description</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead><tbody>${tail.map(r => `<tr><td>${formatDate(r.date)}</td><td class="clip">${bfEscapeHtml(r.note)}${(() => { const mk = descMatchKey(r.desc || r.note); const mb = mk ? bills.find(b => b.recurring && b.matchKey === mk) : null; return mb ? ` <span style="color:var(--accent-blue);">→ ${bfEscapeHtml(mb.name)}</span>` : ''; })()}</td><td style="color:var(--accent-red);">${r.debit ? formatCurrency(r.debit) : ''}</td><td style="color:var(--accent-green);">${r.credit ? formatCurrency(r.credit) : ''}</td><td>${r.balance === null ? '' : formatCurrency(r.balance)}</td></tr>`).join('')}</tbody></table><p style="font-size:11px;color:var(--text-muted);margin:6px 0 0;">Showing the ${Math.min(30, rows.length)} most recent of ${rows.length} row(s).</p>` : '<p style="color:var(--accent-red);font-size:13px;">No rows with a valid date and amount were found — check the column mapping above.</p>';
         }
         function applyBankImport() {
             if (viewOnlyMode()) { showToast('👁️ View-only access.', 'info'); return; }
@@ -2565,16 +2608,93 @@
             const dup = (list, r, amt) => (list || []).some(x => x.date === r.date && Math.abs((x.amount || 0) - amt) < 0.005 && (x.note || '') === r.note);
             const billMatch = r => bills.some(b => (b.payments || []).some(p => p.accountId === acc.id && p.date === r.date && Math.abs((p.amount || 0) - r.debit) < 0.005));
             acc.deposits = acc.deposits || []; acc.debits = acc.debits || [];
-            let nIn = 0, nOut = 0, skipped = 0, inT = 0, outT = 0;
+            let nIn = 0, nOut = 0, nBills = 0, skipped = 0, inT = 0, outT = 0;
             rows.forEach(r => {
                 if (r.credit > 0) { if (dup(acc.deposits, r, r.credit)) { skipped++; return; } acc.deposits.push({ date: r.date, amount: r.credit, note: r.note }); nIn++; inT += r.credit; }
-                else if (r.debit > 0) { if (billMatch(r) || dup(acc.debits, r, r.debit)) { skipped++; return; } acc.debits.push({ date: r.date, amount: r.debit, note: r.note }); nOut++; outT += r.debit; }
+                else if (r.debit > 0) {
+                    const mk = descMatchKey(r.desc || '');
+                    const mb = mk ? bills.find(b => b.recurring && b.matchKey === mk) : null;
+                    if (mb) {
+                        if (billMatch(r)) { skipped++; return; }
+                        recordTaggedPayment(mb, { date: r.date, amount: r.debit, note: r.note }, acc);
+                        nBills++; return;
+                    }
+                    if (billMatch(r) || dup(acc.debits, r, r.debit)) { skipped++; return; }
+                    acc.debits.push({ date: r.date, amount: r.debit, note: r.note }); nOut++; outT += r.debit;
+                }
             });
             let balMsg;
             if (bankImportData.finalBalance !== null && bankImportData.finalBalance !== undefined) { acc.balance = bankImportData.finalBalance; balMsg = ` Balance set to ${formatCurrency(acc.balance)}.`; }
             else { acc.balance = Math.round((acc.balance + inT - outT) * 100) / 100; balMsg = ` Balance adjusted to ${formatCurrency(acc.balance)}.`; }
             saveData(); closeBankImportModal(); renderAll();
-            showToast(`Imported ${nIn} deposit(s) and ${nOut} bank transaction(s)${skipped ? ` · ${skipped} skipped` : ''}.${balMsg}`, nIn + nOut ? 'success' : 'info');
+            showToast(`Imported ${nIn} deposit(s), ${nOut} bank transaction(s) and auto-paid ${nBills} bill(s)${skipped ? ` · ${skipped} skipped` : ''}.${balMsg}`, nIn + nOut + nBills ? 'success' : 'info');
+        }
+        // ============ ACTIVITY SEARCH + TAG AS BILL ============
+        function activitySearchChanged(v) { activitySearch = v || ''; renderWithdrawalsList(); }
+        function descMatchKey(s) { return String(s || '').toLowerCase().replace(/[^a-z]/g, ''); }
+        function recordTaggedPayment(bill, r, acc) {
+            bill.payments = bill.payments || [];
+            bill.payments.push({ date: r.date, amount: r.amount, note: r.note || 'Bank transaction', accountId: acc.id });
+            bill.status = 'paid';
+            if (bill.isPayoff) bill.paidAmount = (bill.paidAmount || 0) + r.amount;
+        }
+        let tagRowIndex = null;
+        let tagMode = 'new';
+        function openTagBillModal(idx) {
+            const r = (currentActivityRows || [])[idx];
+            if (!r || r.type !== 'out') return;
+            tagRowIndex = idx;
+            document.getElementById('tagBillDesc').textContent = r.label;
+            document.getElementById('tagBillDate').textContent = formatDate(r.date);
+            document.getElementById('tagBillAmount').textContent = formatCurrency(r.amount);
+            const mk = r.matchKey || descMatchKey(r.note || r.label);
+            document.getElementById('tagBillMatchKey').textContent = mk ? `"${mk}"` : '(description)';
+            const cleanName = String(r.label || '').replace(/^#\S+\s*·\s*/, '').trim();
+            document.getElementById('tagNewName').value = cleanName.slice(0, 60);
+            document.getElementById('tagNewAmount').value = r.amount;
+            document.getElementById('tagNewCategory').innerHTML = Object.entries(categoryConfig).map(([k, c]) => `<option value="${k}">${bfEscapeHtml(c.label)}</option>`).join('');
+            document.getElementById('tagNewCategory').value = 'other';
+            document.getElementById('tagNewRecurring').classList.add('active');
+            const sel = document.getElementById('tagExistSelect');
+            sel.innerHTML = bills.slice().sort((a, b) => a.name.localeCompare(b.name)).map(b => `<option value="${b.id}">${bfEscapeHtml(b.name)} (${formatCurrency(planBillRemaining(b))}/mo)</option>`).join('');
+            setTagMode('new', document.getElementById('tagModeNewBtn'));
+            document.getElementById('tagBillModal').classList.add('active');
+        }
+        function setTagMode(mode, el) {
+            tagMode = mode;
+            document.getElementById('tagNewPanel').style.display = mode === 'new' ? 'block' : 'none';
+            document.getElementById('tagExistPanel').style.display = mode === 'existing' ? 'block' : 'none';
+            if (el) { el.parentElement.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active')); el.classList.add('active'); }
+        }
+        function closeTagBillModal() { document.getElementById('tagBillModal').classList.remove('active'); tagRowIndex = null; }
+        function applyTagBill() {
+            if (viewOnlyMode()) { showToast('👁️ View-only access.', 'info'); return; }
+            const acc = accounts.find(a => a.id === currentWithdrawalAccountId); if (!acc) return;
+            const r = (currentActivityRows || [])[tagRowIndex]; if (!r) return;
+            const mk = r.matchKey || descMatchKey(r.note || r.label);
+            let msg;
+            if (tagMode === 'existing') {
+                const bill = bills.find(b => b.id === parseInt(document.getElementById('tagExistSelect').value));
+                if (!bill) { showToast('Choose a bill.', 'error'); return; }
+                recordTaggedPayment(bill, r, acc);
+                if (!bill.matchKey) bill.matchKey = mk;
+                msg = `Payment recorded on "${bill.name}".`;
+            } else {
+                const name = document.getElementById('tagNewName').value.trim();
+                const amt = parseFloat(document.getElementById('tagNewAmount').value);
+                if (!name) { showToast('Give the bill a name.', 'error'); return; }
+                if (!amt || amt <= 0) { showToast('Enter a valid amount.', 'error'); return; }
+                const category = document.getElementById('tagNewCategory').value;
+                const recurring = document.getElementById('tagNewRecurring').classList.contains('active');
+                const id = bills.length ? Math.max(...bills.map(b => b.id)) + 1 : 1;
+                const bill = { id: id, name: name, amount: amt, dueDate: r.date, category: category, status: 'paid', recurring: recurring, isPayoff: false, totalOwed: 0, paidAmount: 0, payments: [], interestRate: 0, interestRateType: 'annual', notes: '', preferredAccountId: acc.id, matchKey: mk };
+                recordTaggedPayment(bill, r, acc);
+                bills.push(bill);
+                msg = `"${name}" created — future imports with this description will be matched automatically.`;
+            }
+            acc.debits = (acc.debits || []).filter(d => !(d.date === r.date && Math.abs((d.amount || 0) - r.amount) < 0.005 && (d.note || '') === (r.note || '')));
+            saveData(); closeTagBillModal(); renderAll();
+            showToast(msg, 'success');
         }
         function renderDebts() {
             const debtBills = bills.filter(b => b.isPayoff);
