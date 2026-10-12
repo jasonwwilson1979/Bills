@@ -126,3 +126,15 @@ class AppPageTests(TestCase):
         self.assertIn('MyBills', body)
         self.assertIn('Rent', body)
         self.assertNotIn('state: null', body)
+
+
+class AuthDependencyTests(TestCase):
+    def test_allauth_lazy_dependencies_installed(self):
+        # allauth imports 'jwt' (and cryptography for key verification) lazily
+        # inside its Google id_token handling. If either module is missing,
+        # the OAuth callback dies with ModuleNotFoundError -> HTTP 500 that
+        # allauth's own try/except cannot catch. These must be in
+        # requirements.txt so clean Docker builds include them.
+        import importlib
+        for module_name in ('jwt', 'cryptography'):
+            importlib.import_module(module_name)
