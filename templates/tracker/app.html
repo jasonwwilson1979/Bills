@@ -1033,7 +1033,7 @@
     </div>
 
     <!-- TAG AS BILL MODAL -->
-    <div class="modal-overlay" id="tagBillModal">
+    <div class="modal-overlay" id="tagBillModal" style="z-index:3000;">
         <div class="modal" style="width:470px;">
             <div class="modal-header"><h3 class="modal-title"><i class="fas fa-tag" style="color:var(--accent-blue);margin-right:8px;"></i>Tag as bill</h3><button class="modal-close" onclick="closeTagBillModal()"><i class="fas fa-times"></i></button></div>
             <div class="modal-body" style="max-height:65vh;overflow-y:auto;">
@@ -2640,10 +2640,12 @@
         }
         let tagRowIndex = null;
         let tagMode = 'new';
+        let tagAccId = null;
         function openTagBillModal(idx) {
             const r = (currentActivityRows || [])[idx];
             if (!r || r.type !== 'out') return;
             tagRowIndex = idx;
+            tagAccId = currentWithdrawalAccountId;
             document.getElementById('tagBillDesc').textContent = r.label;
             document.getElementById('tagBillDate').textContent = formatDate(r.date);
             document.getElementById('tagBillAmount').textContent = formatCurrency(r.amount);
@@ -2669,7 +2671,7 @@
         function closeTagBillModal() { document.getElementById('tagBillModal').classList.remove('active'); tagRowIndex = null; }
         function applyTagBill() {
             if (viewOnlyMode()) { showToast('👁️ View-only access.', 'info'); return; }
-            const acc = accounts.find(a => a.id === currentWithdrawalAccountId); if (!acc) return;
+            const acc = accounts.find(a => a.id === tagAccId); if (!acc) return;
             const r = (currentActivityRows || [])[tagRowIndex]; if (!r) return;
             const mk = r.matchKey || descMatchKey(r.note || r.label);
             let msg;
@@ -2694,6 +2696,7 @@
             }
             acc.debits = (acc.debits || []).filter(d => !(d.date === r.date && Math.abs((d.amount || 0) - r.amount) < 0.005 && (d.note || '') === (r.note || '')));
             saveData(); closeTagBillModal(); renderAll();
+            if (currentWithdrawalAccountId) { renderWithdrawalYearTabs(); renderWithdrawalsList(); }
             showToast(msg, 'success');
         }
         function renderDebts() {
