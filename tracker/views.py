@@ -173,15 +173,19 @@ def _validate_plan_item(raw):
     amount = raw.get('amount', 0)
     if isinstance(amount, bool) or not isinstance(amount, (int, float)) or amount < 0 or amount > 10_000_000:
         raise ValueError('paycheck amount must be a number between 0 and 10,000,000')
-    pdate = raw.get('date') or ''
-    if pdate:
-        if not isinstance(pdate, str):
-            raise ValueError('paycheck date must be a string')
+    def _clean_date(value, label):
+        if not value:
+            return ''
+        if not isinstance(value, str):
+            raise ValueError(f'{label} must be a string')
         try:
-            datetime.date.fromisoformat(pdate)
+            datetime.date.fromisoformat(value)
         except ValueError:
-            raise ValueError('paycheck date must be a YYYY-MM-DD date')
-        pdate = pdate[:10]
+            raise ValueError(f'{label} must be a YYYY-MM-DD date')
+        return value[:10]
+
+    pdate = _clean_date(raw.get('date') or '', 'paycheck date')
+    ndate = _clean_date(raw.get('nextDate') or '', 'next paycheck date')
     allocations = raw.get('allocations')
     if allocations is None:
         allocations = {}
@@ -194,7 +198,7 @@ def _validate_plan_item(raw):
         if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0 or value > 1_000_000:
             raise ValueError('allocation amounts must be numbers between 0 and 1,000,000')
         clean[str(key)[:40]] = round(float(value), 2)
-    plan = {'amount': round(float(amount), 2), 'date': pdate, 'allocations': clean}
+    plan = {'amount': round(float(amount), 2), 'date': pdate, 'nextDate': ndate, 'allocations': clean}
     pid = raw.get('id')
     if isinstance(pid, int) and 0 < pid < 2_147_483_647:
         plan['id'] = pid

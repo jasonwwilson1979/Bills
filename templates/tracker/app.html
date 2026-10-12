@@ -656,10 +656,11 @@
                     <div id="planTabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;"></div>
                     <div class="settings-section"><h3 class="settings-section-title">This paycheck</h3>
                         <div class="setting-row">
-                            <div class="setting-info"><h4>Paycheck amount & date</h4><p>The money available to pay bills now. Auto plan covers bills due on or before this date — overdue ones first.</p></div>
+                            <div class="setting-info"><h4>Paycheck amount & dates</h4><p>The money available to pay bills now. Auto plan covers bills due on or before the <b>next paycheck date</b> — overdue ones first.</p></div>
                             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
                                 <input type="number" class="form-input" id="planAmount" placeholder="2300" min="0" step="0.01" style="width:130px;" onchange="planAmountChanged()">
-                                <input type="date" class="form-input" id="planDate" style="width:150px;" onchange="planDateChanged()">
+                                <input type="date" class="form-input" id="planDate" style="width:140px;" onchange="planDateChanged()">
+                                <input type="date" class="form-input" id="planNextDate" style="width:140px;" onchange="planNextDateChanged()">
                                 <button class="btn btn-primary btn-sm" onclick="planAutoAllocate()"><i class="fas fa-wand-magic-sparkles"></i> Auto plan</button>
                                 <button class="btn btn-secondary btn-sm" onclick="planClear()"><i class="fas fa-eraser"></i> Clear</button>
                             </div>
@@ -673,6 +674,7 @@
                             </div>
                         </div>
                     </div>
+                    <div id="planCoverage" style="background:rgba(59,130,246,0.10);border:1px solid rgba(59,130,246,0.35);color:#93c5fd;border-radius:10px;padding:10px 16px;font-size:13px;margin-bottom:12px;"></div>
                     <div class="stats-grid" style="grid-template-columns:repeat(3,1fr);">
                         <div class="stat-card green"><div class="stat-header"><div class="stat-icon"><i class="fas fa-sack-dollar"></i></div></div><div class="stat-value" id="planLeftover">$0.00</div><div class="stat-label">Left after planned bills</div></div>
                         <div class="stat-card blue"><div class="stat-header"><div class="stat-icon"><i class="fas fa-file-invoice-dollar"></i></div></div><div class="stat-value" id="planAllocated">$0.00</div><div class="stat-label">Allocated to bills</div></div>
@@ -2115,6 +2117,7 @@
                 const old = (bfState.paycheckPlan && typeof bfState.paycheckPlan === 'object') ? bfState.paycheckPlan : null;
                 bfState.paycheckPlans = old ? [old] : [];
             }
+            bfState.paycheckPlans.forEach(p => { if (typeof p.nextDate !== 'string') p.nextDate = ''; });
             return bfState.paycheckPlans;
         }
         function planActiveId() {
@@ -2128,7 +2131,7 @@
             const plans = plansGet();
             const id = planActiveId();
             let p = plans.find(x => x.id === id);
-            if (!p) { p = { id: Date.now(), amount: 0, date: '', allocations: {} }; plans.push(p); bfState.activePaycheckPlanId = p.id; }
+            if (!p) { p = { id: Date.now(), amount: 0, date: '', nextDate: '', allocations: {} }; plans.push(p); bfState.activePaycheckPlanId = p.id; }
             if (!p.allocations || typeof p.allocations !== 'object') p.allocations = {};
             return p;
         }
@@ -2144,9 +2147,22 @@
             const key = String(billId);
             return plansGet().some(pl => pl.id !== activeId && pl.allocations && Object.prototype.hasOwnProperty.call(pl.allocations, key));
         }
+        function planWindowEnd() {
+            const p = planActive();
+            let end = p.nextDate;
+            if (!end) {
+                // fall back to the next paycheck in the list (by date), else this paycheck's date
+                const later = plansGet()
+                    .filter(x => x.id !== p.id && x.date && (!p.date || x.date > p.date))
+                    .sort((a, b) => (a.date < b.date ? -1 : 1));
+                end = later.length ? later[0].date : (p.date || new Date().toISOString().slice(0, 10));
+            }
+            if (p.date && end < p.date) end = p.date; // guard against next-date before payday
+            return end;
+        }
         function planWindowBills() {
             const p = planActive();
-            const cutoff = p.date || new Date().toISOString().slice(0, 10);
+            const cutoff = planWindowEnd();
             return bills.filter(b => b.dueDate && b.dueDate <= cutoff && planBillOwes(b) && !planClaimedElsewhere(b.id, p.id)).sort((x, y) => {
                 const ox = x.status === 'overdue' ? 0 : 1, oy = y.status === 'overdue' ? 0 : 1;
                 if (ox !== oy) return ox - oy;
@@ -2156,6 +2172,7 @@
         }
         function planAmountChanged() { const p = planActive(); p.amount = parseFloat(document.getElementById('planAmount').value) || 0; saveData(); planRenderTabs(); planRenderLists(); }
         function planDateChanged() { const p = planActive(); p.date = document.getElementById('planDate').value || ''; saveData(); planRenderTabs(); planRenderLists(); }
+        function planNextDateChanged() { const p = planActive(); p.nextDate = document.getElementById('planNextDate').value || ''; saveData(); planRenderTabs(); planRenderLists(); }
         function planAutoAllocate() {
             if (planReadOnly()) { showToast('👁️ View-only access.', 'info'); return; }
             const p = planActive();
@@ -2215,9 +2232,10 @@
         function planSelect(planId) { bfState.activePaycheckPlanId = planId; saveData(); planRenderTabs(); planRenderLists(); }
         function planSyncInputs() {
             const p = planActive();
-            const amt = document.getElementById('planAmount'), dt = document.getElementById('planDate');
+            const amt = document.getElementById('planAmount'), dt = document.getElementById('planDate'), nd = document.getElementById('planNextDate');
             if (document.activeElement !== amt) amt.value = p.amount || '';
             if (document.activeElement !== dt) dt.value = p.date || '';
+            if (document.activeElement !== nd) nd.value = p.nextDate || '';
         }
         function planRenderTabs() {
             const el = document.getElementById('planTabs');
@@ -2226,7 +2244,7 @@
             const activeId = planActiveId();
             let html = plans.map(p => {
                 const total = Object.values(p.allocations || {}).reduce((s, v) => s + (parseFloat(v) || 0), 0);
-                const label = p.date ? formatDate(p.date) : 'No date yet';
+                const label = p.date ? (p.nextDate ? `${formatDate(p.date)} → ${formatDate(p.nextDate)}` : formatDate(p.date)) : 'No date yet';
                 const active = p.id === activeId;
                 return `<div class="filter-tab ${active ? 'active' : ''}" style="display:inline-flex;align-items:center;gap:8px;" onclick="planSelect(${p.id})"><span>${bfEscapeHtml(label)} · ${formatCurrency(p.amount || 0)}${total ? ` · ${formatCurrency(total)} planned` : ''}</span><span style="opacity:.55;cursor:pointer;margin-left:2px;" title="Remove this paycheck" onclick="event.stopPropagation();planDelete(${p.id})"><i class="fas fa-xmark"></i></span></div>`;
             }).join('');
@@ -2257,6 +2275,15 @@
             document.getElementById('planAllocated').textContent = formatCurrency(totalAlloc);
             document.getElementById('planLeftover').textContent = formatCurrency(leftover);
             document.getElementById('planWaiting').textContent = formatCurrency(waitingTotal);
+            const covEl = document.getElementById('planCoverage');
+            const start = p.date || new Date().toISOString().slice(0, 10);
+            const end = planWindowEnd();
+            const days = Math.max(0, Math.round((new Date(end) - new Date(start)) / 86400000));
+            if (p.nextDate) {
+                covEl.innerHTML = `📅 This paycheck covers bills due <b>${formatDate(p.date || start)}</b> → <b>${formatDate(end)}</b> (${days} day${days === 1 ? '' : 's'} of coverage).`;
+            } else {
+                covEl.innerHTML = `📅 Coverage currently ends <b>${formatDate(end)}</b> — set the <b>next paycheck date</b> above to include bills due through that day.`;
+            }
             const balInfo = b => b.isPayoff ? ` · balance ${formatCurrency(planBillBalance(b))} left` : '';
             const overdueTag = b => b.status === 'overdue' ? ` · <span style='color:var(--accent-amber);'>overdue</span>` : '';
             const payEl = document.getElementById('planPayList');
