@@ -485,6 +485,20 @@
                 <div class="nav-item" data-page="settings" onclick="switchPage('settings')"><i class="fas fa-cog"></i> Settings</div>
             </div>
             <div class="sidebar-footer">
+                {% if sharing.my_pages|length > 1 %}
+                <div style="margin-bottom:10px;">
+                    <div class="nav-section-title" style="padding:0 4px 6px;">Pages</div>
+                    {% for p in sharing.my_pages %}
+                    <form method="post" action="{% url 'api_sharing_select' %}" style="margin:0 0 6px;">
+                        {% csrf_token %}
+                        <input type="hidden" name="page" value="{{ p.id }}">
+                        <button type="submit" class="btn btn-sm {% if p.active %}btn-primary{% else %}btn-secondary{% endif %}" style="width:100%;justify-content:center;">
+                            <i class="fas {% if p.active %}fa-circle-dot{% else %}fa-share-nodes{% endif %}"></i> {{ p.name }}
+                        </button>
+                    </form>
+                    {% endfor %}
+                </div>
+                {% endif %}
                 <div class="user-profile" title="{{ display_name }}">
                     <div class="user-avatar">{{ user_initial }}</div>
                     <div class="user-info"><div class="user-name">{{ display_name }}</div><div class="user-email">{{ user.email }}</div></div>
@@ -497,6 +511,16 @@
         </aside>
 
         <main class="main-content">
+            {% if sharing.viewing_shared %}
+            <div style="background:rgba(59,130,246,0.10);border:1px solid rgba(59,130,246,0.35);color:#93c5fd;padding:10px 16px;border-radius:10px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+                <span><i class="fas fa-users" style="margin-right:8px;"></i>Viewing <b>{{ sharing.owner_name }}</b>'s BillFlow — you are <b>{{ sharing.role }}</b>{% if sharing.readOnly %} (read-only){% endif %}.</span>
+                <form method="post" action="{% url 'api_sharing_select' %}" style="margin:0;">
+                    {% csrf_token %}
+                    <input type="hidden" name="page" value="mine">
+                    <button type="submit" class="btn btn-secondary btn-sm"><i class="fas fa-rotate-left"></i> Back to my page</button>
+                </form>
+            </div>
+            {% endif %}
             <!-- DASHBOARD -->
             <div class="page-section active" id="page-dashboard">
                 <div class="page-header">
@@ -760,6 +784,17 @@
                     <div class="settings-section"><h3 class="settings-section-title">Preferences</h3>
                         <div class="setting-row"><div class="setting-info"><h4>Currency</h4><p>Set your preferred currency</p></div><select class="form-select" style="width:140px;"><option>USD ($)</option><option>EUR (€)</option><option>GBP (£)</option><option>CAD (C$)</option></select></div>
                         <div class="setting-row"><div class="setting-info"><h4>First Day of Week</h4><p>Choose the start day for calendar view</p></div><select class="form-select" style="width:140px;"><option>Sunday</option><option>Monday</option></select></div>
+                    </div>
+                    <div class="settings-section"><h3 class="settings-section-title">Sharing</h3>
+                        <div class="setting-row">
+                            <div class="setting-info"><h4>Invite someone</h4><p>Give a Google account access to <b>your</b> page. Editors can change everything; viewers get read-only access. Pending invites activate the next time that person signs in.</p></div>
+                            <div style="display:flex;gap:8px;align-items:center;">
+                                <input type="email" class="form-input" id="shareEmail" placeholder="name@gmail.com" style="width:190px;">
+                                <select class="form-select" id="shareRole" style="width:110px;"><option value="editor">Editor</option><option value="viewer">Viewer</option></select>
+                                <button class="btn btn-primary btn-sm" onclick="addSharedMember()"><i class="fas fa-user-plus"></i> Invite</button>
+                            </div>
+                        </div>
+                        <div id="sharingList" style="margin-top:8px;"></div>
                     </div>
                     <div class="settings-section"><h3 class="settings-section-title">Data</h3>
                         <div class="setting-row"><div class="setting-info"><h4>Import Bills</h4><p>Add bills in bulk from a CSV file</p></div><button class="btn btn-secondary btn-sm" onclick="openImportModal()"><i class="fas fa-file-import"></i> Import CSV</button></div>
@@ -1114,7 +1149,8 @@
         window.BF_BOOTSTRAP = {
             displayName: "{{ display_name|escapejs }}",
             email: "{{ user.email|escapejs }}",
-            state: {{ state_json|safe }}
+            state: {{ state_json|safe }},
+            sharing: {{ sharing_json|safe }}
         };
     </script>
 
@@ -2545,16 +2581,74 @@
         }
 
         function pushStateToServer() {
+            if (BF_BOOTSTRAP.sharing && BF_BOOTSTRAP.sharing.readOnly) {
+                showToast('👁️ View-only access — changes on this shared page are not saved.', 'info');
+                return;
+            }
             fetch('/api/state/', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
                 body: JSON.stringify({ appName: getAppName(), budgets: getBudgets(), bills: bills, accounts: accounts })
             }).then(r => {
+                if (r.status === 403) { showToast('👁️ View-only access — changes are not saved.', 'info'); return; }
                 if (!r.ok) throw new Error('HTTP ' + r.status);
             }).catch(err => {
                 showToast('⚠️ Could not save to the server — your changes may be lost on reload.', 'error');
             });
         }
+
+        // ---- Sharing management (owner side, Settings page) ----
+        function sharingFetch(method, body) {
+            return fetch('/api/sharing/', {
+                method: method,
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+                body: body ? JSON.stringify(body) : undefined
+            }).then(r => r.text().then(t => {
+                let data = t;
+                try { data = JSON.parse(t); } catch (e) { /* plain-text error */ }
+                return { ok: r.ok, data: data };
+            }));
+        }
+        function bfEscapeHtml(s) {
+            return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
+        function loadSharing() {
+            sharingFetch('GET').then(({ data }) => renderSharing(data)).catch(() => {});
+        }
+        function renderSharing(d) {
+            const el = document.getElementById('sharingList');
+            if (!el) return;
+            let html = '';
+            (d.members || []).forEach(m => {
+                html += `<div class="setting-row" style="align-items:center;"><div class="setting-info"><h4 style="font-size:14px;">${bfEscapeHtml(m.name)} <span style="color:var(--text-muted);font-weight:400;">${bfEscapeHtml(m.email)}</span></h4><p>${m.role === 'editor' ? '✏️ Editor' : '👁️ Viewer (read-only)'}</p></div><button class="btn btn-danger btn-sm" onclick="removeSharedMember('${bfEscapeHtml(m.email)}')"><i class="fas fa-user-minus"></i> Remove</button></div>`;
+            });
+            (d.pending || []).forEach(p => {
+                html += `<div class="setting-row" style="align-items:center;"><div class="setting-info"><h4 style="font-size:14px;">${bfEscapeHtml(p.email)}</h4><p>⏳ Pending invite (${p.role}) — activates on their next sign-in</p></div><button class="btn btn-danger btn-sm" onclick="removeSharedMember('${bfEscapeHtml(p.email)}')"><i class="fas fa-user-minus"></i> Remove</button></div>`;
+            });
+            el.innerHTML = html || '<p style="color:var(--text-muted);font-size:13px;">No one has access yet. Invite someone above.</p>';
+        }
+        function addSharedMember() {
+            const email = document.getElementById('shareEmail').value.trim();
+            const role = document.getElementById('shareRole').value;
+            if (!email) { showToast('Enter an email address.', 'error'); return; }
+            sharingFetch('POST', { email: email, role: role }).then(({ ok, data }) => {
+                if (!ok) {
+                    const msg = (data && data.error) || (typeof data === 'string' && data) || 'Could not add that person.';
+                    showToast(msg, 'error');
+                    return;
+                }
+                document.getElementById('shareEmail').value = '';
+                showToast(data.status === 'invited' ? 'Invite saved — it activates when they next sign in.' : 'Access granted.', 'success');
+                loadSharing();
+            }).catch(() => showToast('Something went wrong.', 'error'));
+        }
+        function removeSharedMember(email) {
+            sharingFetch('DELETE', { email: email }).then(() => {
+                showToast('Access removed.', 'success');
+                loadSharing();
+            }).catch(() => showToast('Something went wrong.', 'error'));
+        }
+        loadSharing();
 
         function getCookie(name) {
             const m = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));

@@ -12,6 +12,10 @@ python manage.py collectstatic --noinput
 echo "==> BillFlow: ensuring persistent secret key"
 python manage.py shell -c "from django.conf import settings; assert settings.SECRET_KEY, 'SECRET_KEY missing'"
 
+# Give the BILLFLOW_ADMIN_EMAIL account Django-admin access (no-op when unset)
+echo "==> BillFlow: ensuring admin access"
+python manage.py ensure_admin
+
 # In-container port (the container side of the host:container mapping).
 # Default 8000; set BILLFLOW_CONTAINER_PORT in the environment to change it.
 BIND_PORT="${BILLFLOW_CONTAINER_PORT:-8000}"

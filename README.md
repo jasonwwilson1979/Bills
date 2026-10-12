@@ -105,6 +105,7 @@ port**, so BillFlow can live alongside your other web apps.
 | `BILLFLOW_CONTAINER_PORT` | `581` | port gunicorn listens on *inside* the container (default `8000`) |
 | `GOOGLE_CLIENT_ID` | `...apps.googleusercontent.com` | Google sign-in |
 | `GOOGLE_CLIENT_SECRET` | `...` | Google sign-in |
+| `BILLFLOW_ADMIN_EMAIL` | `you@gmail.com` | optional: gives that Google account access to `/admin/` (see below) |
 | `DJANGO_ALLOWED_HOSTS` | `bills.example.com` | only needed once served via a domain |
 | `DJANGO_CSRF_TRUSTED_ORIGINS` | `https://bills.example.com` | needed behind a proxy |
 
@@ -179,6 +180,41 @@ Prefer doing it manually? Copy the project to the server (git clone / scp),
 then run `sudo bash deploy/ubuntu-server-setup.sh --domain your-domain` or
 `sudo docker compose up -d --build`. Add `-DryRun` to the PowerShell helper to
 preview every command it would run.
+
+## Sharing your page with others
+
+Open **Settings → Sharing** to give other Google accounts access to your page:
+
+- **Invite someone** — enter their Gmail address and pick a role. If that
+  person has already signed in to this BillFlow at least once, access is
+  granted immediately; otherwise the invite stays *pending* and activates
+  automatically the next time they sign in with that address.
+- **Editor** can change everything on your page (bills, accounts, settings).
+- **Viewer** gets read-only access — the app shows a view-only notice and
+  saving is blocked server-side too.
+- **Remove** takes their access away at any time. Pending invites are listed
+  alongside active members and can be removed the same way.
+
+People with access see a **Pages** switcher in the sidebar (plus a banner
+while viewing someone else's page) and can jump between their own page and
+the shared one. Everyone always signs in with their own Google account; a
+removed member automatically falls back to their own page.
+
+## Django admin with your Google account
+
+Django's admin lives at `/admin/`, but Google-created accounts are regular
+users and can't open it by default. To give your account admin access, set
+the stack environment variable `BILLFLOW_ADMIN_EMAIL` to your Gmail address
+and recreate the stack — it is applied on every container start *and* on
+every sign-in:
+
+```text
+BILLFLOW_ADMIN_EMAIL=you@gmail.com
+```
+
+Then sign in with Google as usual and open `https://your-domain/admin/` —
+no password needed, your existing session is enough. There you can inspect
+users, sharing memberships and each page's stored JSON document.
 
 ## Troubleshooting: "failed to read stack.env: Invalid template"
 

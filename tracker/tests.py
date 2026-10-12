@@ -1,7 +1,11 @@
 import json
+import os
 
 from django.contrib.auth.models import User
+from django.contrib.auth.signals import user_logged_in
+from django.core.management import call_command
 from django.test import TestCase, override_settings
+from unittest import mock
 
 FAKE_GOOGLE = {
     'google': {
@@ -138,3 +142,143 @@ class AuthDependencyTests(TestCase):
         import importlib
         for module_name in ('jwt', 'cryptography'):
             importlib.import_module(module_name)
+
+
+class SharingTests(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(username='owner', email='owner@example.com',
+                                              first_name='Owen', password='pw123456789')
+        self.member = User.objects.create_user(username='member', email='member@example.com',
+                                               first_name='Mia', password='pw123456789')
+
+    def _save_owner_doc(self, app_name='HomeBills'):
+        self.client.force_login(self.owner)
+        doc = {'appName': app_name, 'budgets': {}, 'bills': [{'id': 1, 'name': 'Rent'}], 'accounts': []}
+        r = self.client.put('/api/state/', data=json.dumps(doc), content_type='application/json')
+        self.assertEqual(r.status_code, 200)
+
+    def test_invite_existing_user_editor_can_read_and_write(self):
+        self._save_owner_doc()
+        self.client.force_login(self.owner)
+        r = self.client.post('/api/sharing/', data=json.dumps({'email': 'member@example.com', 'role': 'editor'}),
+                             content_type='application/json')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()['status'], 'added')
+
+        # The member switches to the owner's page and can read + write it
+        self.client.force_login(self.member)
+        r = self.client.post('/api/sharing/select/', data={'page': str(self.owner.pk)})
+        self.assertEqual(r.status_code, 302)
+        r2 = self.client.get('/api/state/')
+        self.assertTrue(r2.json()['exists'])
+        self.assertEqual(r2.json()['data']['appName'], 'HomeBills')
+        doc2 = {'appName': 'HomeBills', 'budgets': {}, 'bills': [{'id': 2, 'name': 'Power'}], 'accounts': []}
+        r3 = self.client.put('/api/state/', data=json.dumps(doc2), content_type='application/json')
+        self.assertEqual(r3.status_code, 200)
+
+        # The owner sees the member's change on their own page
+        self.client.force_login(self.owner)
+        r4 = self.client.get('/api/state/')
+        self.assertEqual(r4.json()['data']['bills'][0]['name'], 'Power')
+
+    def test_viewer_cannot_write_shared_page(self):
+        self._save_owner_doc()
+        self.client.force_login(self.owner)
+        self.client.post('/api/sharing/', data=json.dumps({'email': 'member@example.com', 'role': 'viewer'}),
+                         content_type='application/json')
+        self.client.force_login(self.member)
+        self.client.post('/api/sharing/select/', data={'page': str(self.owner.pk)})
+        r = self.client.put('/api/state/', data=json.dumps({'appName': 'x', 'budgets': {}, 'bills': [], 'accounts': []}),
+                            content_type='application/json')
+        self.assertEqual(r.status_code, 403)
+        # Reads still work
+        r2 = self.client.get('/api/state/')
+        self.assertTrue(r2.json()['exists'])
+
+    def test_home_shows_shared_banner_and_page_switcher(self):
+        self._save_owner_doc()
+        self.client.force_login(self.owner)
+        self.client.post('/api/sharing/', data=json.dumps({'email': 'member@example.com', 'role': 'viewer'}),
+                         content_type='application/json')
+        self.client.force_login(self.member)
+        self.client.post('/api/sharing/select/', data={'page': str(self.owner.pk)})
+        r = self.client.get('/')
+        body = r.content.decode()
+        self.assertIn('Viewing', body)
+        self.assertIn('Owen', body)
+        self.assertIn('read-only', body)
+        self.assertIn('My BillFlow', body)
+
+    def test_pending_invite_activates_on_login(self):
+        self._save_owner_doc()
+        self.client.force_login(self.owner)
+        r = self.client.post('/api/sharing/', data=json.dumps({'email': 'newguy@example.com', 'role': 'editor'}),
+                             content_type='application/json')
+        self.assertEqual(r.json()['status'], 'invited')
+
+        # The invited person signs in with Google -> django's login signal fires
+        newbie = User.objects.create_user(username='newguy', email='newguy@example.com', password='pw123456789')
+        user_logged_in.send(sender=User, request=None, user=newbie)
+
+        self.client.force_login(newbie)
+        r2 = self.client.post('/api/sharing/select/', data={'page': str(self.owner.pk)})
+        self.assertEqual(r2.status_code, 302)
+        r3 = self.client.get('/api/state/')
+        self.assertTrue(r3.json()['exists'])
+        self.assertEqual(r3.json()['data']['appName'], 'HomeBills')
+
+        # The invite has been consumed
+        self.client.force_login(self.owner)
+        r4 = self.client.get('/api/sharing/')
+        self.assertEqual(r4.json()['pending'], [])
+        self.assertEqual(len(r4.json()['members']), 1)
+
+    def test_remove_member_revokes_access(self):
+        self.client.force_login(self.owner)
+        self.client.post('/api/sharing/', data=json.dumps({'email': 'member@example.com', 'role': 'editor'}),
+                         content_type='application/json')
+        r = self.client.delete('/api/sharing/', data=json.dumps({'email': 'member@example.com'}),
+                               content_type='application/json')
+        self.assertTrue(r.json()['removed'])
+
+        self.client.force_login(self.member)
+        r2 = self.client.post('/api/sharing/select/', data={'page': str(self.owner.pk)})
+        self.assertEqual(r2.status_code, 403)
+        # Their own page still works
+        r3 = self.client.get('/api/state/')
+        self.assertFalse(r3.json()['exists'])
+
+    def test_cannot_invite_self_invalid_email_or_role(self):
+        self.client.force_login(self.owner)
+        r = self.client.post('/api/sharing/', data=json.dumps({'email': 'owner@example.com', 'role': 'editor'}),
+                             content_type='application/json')
+        self.assertEqual(r.status_code, 400)
+        r2 = self.client.post('/api/sharing/', data=json.dumps({'email': 'not-an-email', 'role': 'editor'}),
+                              content_type='application/json')
+        self.assertEqual(r2.status_code, 400)
+        r3 = self.client.post('/api/sharing/', data=json.dumps({'email': 'x@example.com', 'role': 'admin'}),
+                              content_type='application/json')
+        self.assertEqual(r3.status_code, 400)
+
+    def test_select_without_access_rejected(self):
+        self.client.force_login(self.member)
+        r = self.client.post('/api/sharing/select/', data={'page': '999999'})
+        self.assertEqual(r.status_code, 403)
+
+
+class EnsureAdminTests(TestCase):
+    @mock.patch.dict(os.environ, {'BILLFLOW_ADMIN_EMAIL': 'owner@example.com'})
+    def test_promotes_matching_email(self):
+        u = User.objects.create_user(username='o', email='Owner@Example.com', password='pw123456789')
+        call_command('ensure_admin', verbosity=0)
+        u.refresh_from_db()
+        self.assertTrue(u.is_staff)
+        self.assertTrue(u.is_superuser)
+
+    @mock.patch.dict(os.environ, {'BILLFLOW_ADMIN_EMAIL': 'future@example.com'})
+    def test_noop_when_user_not_yet_created(self):
+        call_command('ensure_admin', verbosity=0)
+        self.assertFalse(User.objects.filter(email__iexact='future@example.com').exists())
+
+    def test_noop_when_env_unset(self):
+        call_command('ensure_admin', verbosity=0)
