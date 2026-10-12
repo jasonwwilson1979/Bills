@@ -1,3 +1,4 @@
+import datetime
 import json
 
 from django.conf import settings
@@ -103,11 +104,22 @@ def api_state(request):
     if len(bills) > 5000 or len(accounts) > 200:
         return HttpResponseBadRequest('Too many records')
 
+    existing = UserData.objects.filter(user=owner).first()
+    try:
+        if 'paycheckPlan' in payload:
+            plan = _validate_paycheck_plan(payload['paycheckPlan'])
+        else:
+            # Key omitted (e.g. an older tab) -> keep whatever is stored
+            plan = (existing.data or {}).get('paycheckPlan') if existing else None
+    except ValueError as exc:
+        return HttpResponseBadRequest(str(exc))
+
     doc = {
         'appName': str(payload.get('appName') or 'BillFlow')[:60],
         'budgets': payload.get('budgets') if isinstance(payload.get('budgets'), dict) else {},
         'bills': bills,
         'accounts': accounts,
+        'paycheckPlan': plan,
     }
     obj, _created = UserData.objects.get_or_create(user=owner, defaults={'data': doc})
     if obj.data != doc:
@@ -148,6 +160,40 @@ def _json_body(request):
     except (ValueError, UnicodeDecodeError):
         return None
     return payload if isinstance(payload, dict) else None
+
+
+def _validate_paycheck_plan(raw):
+    """Validate the optional paycheck-plan structure. Returns a cleaned dict
+    (or None); raises ValueError with a user-friendly message on bad input."""
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError('paycheckPlan must be an object')
+    amount = raw.get('amount', 0)
+    if isinstance(amount, bool) or not isinstance(amount, (int, float)) or amount < 0 or amount > 10_000_000:
+        raise ValueError('paycheckPlan.amount must be a number between 0 and 10,000,000')
+    pdate = raw.get('date') or ''
+    if pdate:
+        if not isinstance(pdate, str):
+            raise ValueError('paycheckPlan.date must be a string')
+        try:
+            datetime.date.fromisoformat(pdate)
+        except ValueError:
+            raise ValueError('paycheckPlan.date must be a YYYY-MM-DD date')
+        pdate = pdate[:10]
+    allocations = raw.get('allocations')
+    if allocations is None:
+        allocations = {}
+    if not isinstance(allocations, dict):
+        raise ValueError('paycheckPlan.allocations must be an object of bill id -> amount')
+    if len(allocations) > 5000:
+        raise ValueError('Too many allocations')
+    clean = {}
+    for key, value in allocations.items():
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0 or value > 1_000_000:
+            raise ValueError('allocation amounts must be numbers between 0 and 1,000,000')
+        clean[str(key)[:40]] = round(float(value), 2)
+    return {'amount': round(float(amount), 2), 'date': pdate, 'allocations': clean}
 
 
 @login_required

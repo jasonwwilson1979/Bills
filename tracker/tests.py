@@ -312,3 +312,49 @@ class BrandTests(TestCase):
         self.assertEqual(r.status_code, 200)
         body = b''.join(r.streaming_content)
         self.assertIn(b'<svg', body)
+
+
+class PaycheckPlanTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='planner', email='planner@example.com', password='pw123456789')
+        self.client.force_login(self.user)
+
+    def _put(self, doc):
+        return self.client.put('/api/state/', data=json.dumps(doc), content_type='application/json')
+
+    def test_paycheck_plan_roundtrip(self):
+        doc = {'appName': 'B', 'budgets': {}, 'bills': [], 'accounts': [],
+               'paycheckPlan': {'amount': 2300, 'date': '2026-10-15', 'allocations': {'1': 1200}}}
+        r = self._put(doc)
+        self.assertEqual(r.status_code, 200)
+        g = self.client.get('/api/state/')
+        plan = g.json()['data']['paycheckPlan']
+        self.assertEqual(plan['amount'], 2300)
+        self.assertEqual(plan['date'], '2026-10-15')
+        self.assertEqual(plan['allocations'], {'1': 1200.0})
+
+    def test_paycheck_plan_validation_rejects_bad_payloads(self):
+        base = {'appName': 'B', 'budgets': {}, 'bills': [], 'accounts': []}
+        for bad in ({'amount': 'rich'}, {'amount': True}, {'amount': -5}, {'amount': 10**9},
+                    {'date': 'soon'}, {'date': 5}, {'allocations': {'1': 'x'}},
+                    {'allocations': []}, 'nope', 12):
+            doc = dict(base, paycheckPlan=bad)
+            r = self._put(doc)
+            self.assertEqual(r.status_code, 400, msg=f'payload {bad!r} should be rejected')
+
+    def test_paycheck_plan_preserved_when_omitted(self):
+        doc = {'appName': 'B', 'budgets': {}, 'bills': [], 'accounts': [],
+               'paycheckPlan': {'amount': 100, 'date': '2026-10-15', 'allocations': {}}}
+        self._put(doc)
+        r = self._put({'appName': 'B2', 'budgets': {}, 'bills': [], 'accounts': []})
+        self.assertEqual(r.status_code, 200)
+        g = self.client.get('/api/state/')
+        self.assertEqual(g.json()['data']['paycheckPlan']['amount'], 100)
+
+    def test_paycheck_plan_can_be_cleared(self):
+        doc = {'appName': 'B', 'budgets': {}, 'bills': [], 'accounts': [],
+               'paycheckPlan': {'amount': 100, 'date': '2026-10-15', 'allocations': {}}}
+        self._put(doc)
+        self._put({'appName': 'B', 'budgets': {}, 'bills': [], 'accounts': [], 'paycheckPlan': None})
+        g = self.client.get('/api/state/')
+        self.assertIsNone(g.json()['data']['paycheckPlan'])
