@@ -106,11 +106,15 @@ def api_state(request):
 
     existing = UserData.objects.filter(user=owner).first()
     try:
-        if 'paycheckPlan' in payload:
-            plan = _validate_paycheck_plan(payload['paycheckPlan'])
+        if 'paycheckPlans' in payload:
+            plans = _validate_paycheck_plans(payload['paycheckPlans'])
+        elif 'paycheckPlan' in payload:
+            # older single-plan client -> migrate into the list
+            single = _validate_plan_item(payload['paycheckPlan']) if payload['paycheckPlan'] is not None else None
+            plans = [single] if single else []
         else:
             # Key omitted (e.g. an older tab) -> keep whatever is stored
-            plan = (existing.data or {}).get('paycheckPlan') if existing else None
+            plans = (existing.data or {}).get('paycheckPlans') if existing else None
     except ValueError as exc:
         return HttpResponseBadRequest(str(exc))
 
@@ -119,7 +123,7 @@ def api_state(request):
         'budgets': payload.get('budgets') if isinstance(payload.get('budgets'), dict) else {},
         'bills': bills,
         'accounts': accounts,
-        'paycheckPlan': plan,
+        'paycheckPlans': plans,
     }
     obj, _created = UserData.objects.get_or_create(user=owner, defaults={'data': doc})
     if obj.data != doc:
@@ -162,30 +166,27 @@ def _json_body(request):
     return payload if isinstance(payload, dict) else None
 
 
-def _validate_paycheck_plan(raw):
-    """Validate the optional paycheck-plan structure. Returns a cleaned dict
-    (or None); raises ValueError with a user-friendly message on bad input."""
-    if raw is None:
-        return None
+def _validate_plan_item(raw):
+    """Validate one paycheck plan; returns a cleaned dict or raises ValueError."""
     if not isinstance(raw, dict):
-        raise ValueError('paycheckPlan must be an object')
+        raise ValueError('each paycheck plan must be an object')
     amount = raw.get('amount', 0)
     if isinstance(amount, bool) or not isinstance(amount, (int, float)) or amount < 0 or amount > 10_000_000:
-        raise ValueError('paycheckPlan.amount must be a number between 0 and 10,000,000')
+        raise ValueError('paycheck amount must be a number between 0 and 10,000,000')
     pdate = raw.get('date') or ''
     if pdate:
         if not isinstance(pdate, str):
-            raise ValueError('paycheckPlan.date must be a string')
+            raise ValueError('paycheck date must be a string')
         try:
             datetime.date.fromisoformat(pdate)
         except ValueError:
-            raise ValueError('paycheckPlan.date must be a YYYY-MM-DD date')
+            raise ValueError('paycheck date must be a YYYY-MM-DD date')
         pdate = pdate[:10]
     allocations = raw.get('allocations')
     if allocations is None:
         allocations = {}
     if not isinstance(allocations, dict):
-        raise ValueError('paycheckPlan.allocations must be an object of bill id -> amount')
+        raise ValueError('allocations must be an object of bill id -> amount')
     if len(allocations) > 5000:
         raise ValueError('Too many allocations')
     clean = {}
@@ -193,7 +194,22 @@ def _validate_paycheck_plan(raw):
         if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0 or value > 1_000_000:
             raise ValueError('allocation amounts must be numbers between 0 and 1,000,000')
         clean[str(key)[:40]] = round(float(value), 2)
-    return {'amount': round(float(amount), 2), 'date': pdate, 'allocations': clean}
+    plan = {'amount': round(float(amount), 2), 'date': pdate, 'allocations': clean}
+    pid = raw.get('id')
+    if isinstance(pid, int) and 0 < pid < 2_147_483_647:
+        plan['id'] = pid
+    return plan
+
+
+def _validate_paycheck_plans(raw):
+    """Validate the paycheck-plans list. Returns a cleaned list or raises."""
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        raise ValueError('paycheckPlans must be a list')
+    if len(raw) > 50:
+        raise ValueError('Too many paycheck plans (max 50)')
+    return [_validate_plan_item(item) for item in raw]
 
 
 @login_required

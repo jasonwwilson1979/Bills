@@ -653,6 +653,7 @@
             <div class="page-section" id="page-plan">
                 <div class="page-header"><div><h1 class="page-title">💵 Paycheck Plan</h1><p class="page-subtitle">Decide which bills this paycheck covers — and what waits for the next one.</p></div></div>
                 <div class="card"><div class="card-body">
+                    <div id="planTabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;"></div>
                     <div class="settings-section"><h3 class="settings-section-title">This paycheck</h3>
                         <div class="setting-row">
                             <div class="setting-info"><h4>Paycheck amount & date</h4><p>The money available to pay bills now. Auto plan covers bills due on or before this date — overdue ones first.</p></div>
@@ -2104,41 +2105,62 @@
             const blob=new Blob([csv],{type:'text/csv'}),url=URL.createObjectURL(blob),a=document.createElement('a');
             a.href=url;a.download=`billflow_${new Date().toISOString().split('T')[0]}.csv`;a.click();URL.revokeObjectURL(url);showToast('Exported!','success');
         }
-        function clearAllData() { if(confirm('Delete ALL data permanently?')){bills=[];accounts=[];selectedBillIds.clear();savingsSelectedIds.clear();if(bfState)bfState.paycheckPlan={amount:0,date:'',allocations:{}};saveData();renderAll();setAppName('BillFlow');showToast('All data cleared.','info');} }
+        function clearAllData() { if(confirm('Delete ALL data permanently?')){bills=[];accounts=[];selectedBillIds.clear();savingsSelectedIds.clear();if(bfState){bfState.paycheckPlans=[];bfState.activePaycheckPlanId=null;}saveData();renderAll();setAppName('BillFlow');showToast('All data cleared.','info');} }
 
-        // ============ PAYCHECK PLAN ============
-        function planRead() {
+        // ============ PAYCHECK PLAN (multiple plans) ============
+        function plansGet() {
             ensureState();
-            if (!bfState.paycheckPlan || typeof bfState.paycheckPlan !== 'object') {
-                bfState.paycheckPlan = { amount: 0, date: '', allocations: {} };
+            if (!Array.isArray(bfState.paycheckPlans)) {
+                // migrate the old single-plan field into a list
+                const old = (bfState.paycheckPlan && typeof bfState.paycheckPlan === 'object') ? bfState.paycheckPlan : null;
+                bfState.paycheckPlans = old ? [old] : [];
             }
-            const p = bfState.paycheckPlan;
+            return bfState.paycheckPlans;
+        }
+        function planActiveId() {
+            const plans = plansGet();
+            if (!bfState.activePaycheckPlanId || !plans.some(p => p.id === bfState.activePaycheckPlanId)) {
+                bfState.activePaycheckPlanId = plans.length ? plans[0].id : null;
+            }
+            return bfState.activePaycheckPlanId;
+        }
+        function planActive() {
+            const plans = plansGet();
+            const id = planActiveId();
+            let p = plans.find(x => x.id === id);
+            if (!p) { p = { id: Date.now(), amount: 0, date: '', allocations: {} }; plans.push(p); bfState.activePaycheckPlanId = p.id; }
             if (!p.allocations || typeof p.allocations !== 'object') p.allocations = {};
             return p;
         }
         function planReadOnly() { return BF_BOOTSTRAP.sharing && BF_BOOTSTRAP.sharing.readOnly; }
         function planBillRemaining(b) {
-            if (b.isPayoff) return Math.max(0, (b.totalOwed || 0) - (b.paidAmount || 0));
+            // Plan against the MONTHLY payment amount (b.amount). For debt/payoff
+            // bills that is the monthly instalment — not the whole payoff balance.
             return b.status === 'paid' ? 0 : (b.amount || 0);
         }
+        function planBillBalance(b) { return Math.max(0, (b.totalOwed || 0) - (b.paidAmount || 0)); }
         function planBillOwes(b) { return planBillRemaining(b) > 0 && (b.status === 'pending' || b.status === 'overdue'); }
+        function planClaimedElsewhere(billId, activeId) {
+            const key = String(billId);
+            return plansGet().some(pl => pl.id !== activeId && pl.allocations && Object.prototype.hasOwnProperty.call(pl.allocations, key));
+        }
         function planWindowBills() {
-            const p = planRead();
+            const p = planActive();
             const cutoff = p.date || new Date().toISOString().slice(0, 10);
-            return bills.filter(b => b.dueDate && b.dueDate <= cutoff && planBillOwes(b)).sort((x, y) => {
+            return bills.filter(b => b.dueDate && b.dueDate <= cutoff && planBillOwes(b) && !planClaimedElsewhere(b.id, p.id)).sort((x, y) => {
                 const ox = x.status === 'overdue' ? 0 : 1, oy = y.status === 'overdue' ? 0 : 1;
                 if (ox !== oy) return ox - oy;
                 if (x.dueDate !== y.dueDate) return x.dueDate < y.dueDate ? -1 : 1;
                 return (x.amount || 0) - (y.amount || 0);
             });
         }
-        function planAmountChanged() { const p = planRead(); p.amount = parseFloat(document.getElementById('planAmount').value) || 0; saveData(); planRenderLists(); }
-        function planDateChanged() { const p = planRead(); p.date = document.getElementById('planDate').value || ''; saveData(); planRenderLists(); }
+        function planAmountChanged() { const p = planActive(); p.amount = parseFloat(document.getElementById('planAmount').value) || 0; saveData(); planRenderTabs(); planRenderLists(); }
+        function planDateChanged() { const p = planActive(); p.date = document.getElementById('planDate').value || ''; saveData(); planRenderTabs(); planRenderLists(); }
         function planAutoAllocate() {
             if (planReadOnly()) { showToast('👁️ View-only access.', 'info'); return; }
-            const p = planRead();
-            if (!p.amount || p.amount <= 0) { showToast('Enter your paycheck amount first.', 'error'); return; }
-            if (!p.date) { showToast('Pick the paycheck date first.', 'error'); return; }
+            const p = planActive();
+            if (!p.amount || p.amount <= 0) { showToast('Enter this paycheck\'s amount first.', 'error'); return; }
+            if (!p.date) { showToast('Pick this paycheck\'s date first.', 'error'); return; }
             p.allocations = {};
             let left = p.amount;
             planWindowBills().forEach(b => {
@@ -2146,37 +2168,70 @@
                 const give = Math.min(left, owed);
                 if (give > 0.005) { p.allocations[String(b.id)] = Math.round(give * 100) / 100; left = Math.round((left - give) * 100) / 100; }
             });
-            saveData(); planRenderLists();
+            saveData(); planRenderTabs(); planRenderLists();
             const waited = planWindowBills().length - Object.keys(p.allocations).length;
-            showToast(waited > 0 ? `Plan created — ${waited} bill(s) wait for the next paycheck.` : 'Plan created — everything fits!', 'success');
+            showToast(waited > 0 ? `Plan created — ${waited} bill(s) left for another paycheck.` : 'Plan created — everything fits!', 'success');
         }
         function planClear() {
             if (planReadOnly()) { showToast('👁️ View-only access.', 'info'); return; }
-            planRead().allocations = {};
-            saveData(); planRenderLists(); showToast('Plan cleared.', 'info');
+            planActive().allocations = {};
+            saveData(); planRenderTabs(); planRenderLists(); showToast('Allocations cleared for this paycheck.', 'info');
         }
         function planSetAlloc(billId, value) {
             if (planReadOnly()) { showToast('👁️ View-only access.', 'info'); return; }
-            const p = planRead(); const b = bills.find(x => x.id === billId); if (!b) return;
+            const p = planActive(); const b = bills.find(x => x.id === billId); if (!b) return;
             const max = planBillRemaining(b);
             let amt = parseFloat(value) || 0;
             if (amt < 0) amt = 0;
             if (amt > max) amt = max;
             amt = Math.round(amt * 100) / 100;
             if (amt > 0) p.allocations[String(billId)] = amt; else delete p.allocations[String(billId)];
-            saveData(); planRenderLists();
+            saveData(); planRenderTabs(); planRenderLists();
         }
         function planAllocateFull(billId) {
             if (planReadOnly()) { showToast('👁️ View-only access.', 'info'); return; }
             const b = bills.find(x => x.id === billId); if (!b) return;
-            planRead().allocations[String(billId)] = planBillRemaining(b);
-            saveData(); planRenderLists();
+            planActive().allocations[String(billId)] = planBillRemaining(b);
+            saveData(); planRenderTabs(); planRenderLists();
         }
+        function planAdd() {
+            if (planReadOnly()) { showToast('👁️ View-only access.', 'info'); return; }
+            const plans = plansGet();
+            const p = { id: Date.now(), amount: 0, date: '', allocations: {} };
+            plans.push(p); bfState.activePaycheckPlanId = p.id;
+            saveData(); planRenderTabs(); planRenderLists();
+            showToast('New paycheck added — set its amount and date.', 'success');
+        }
+        function planDelete(planId) {
+            if (planReadOnly()) { showToast('👁️ View-only access.', 'info'); return; }
+            const plans = plansGet();
+            const idx = plans.findIndex(x => x.id === planId);
+            if (idx === -1) return;
+            plans.splice(idx, 1);
+            if (bfState.activePaycheckPlanId === planId) bfState.activePaycheckPlanId = plans.length ? plans[Math.max(0, idx - 1)].id : null;
+            saveData(); planRenderTabs(); planRenderLists();
+            showToast('Paycheck removed.', 'info');
+        }
+        function planSelect(planId) { bfState.activePaycheckPlanId = planId; saveData(); planRenderTabs(); planRenderLists(); }
         function planSyncInputs() {
-            const p = planRead();
+            const p = planActive();
             const amt = document.getElementById('planAmount'), dt = document.getElementById('planDate');
             if (document.activeElement !== amt) amt.value = p.amount || '';
             if (document.activeElement !== dt) dt.value = p.date || '';
+        }
+        function planRenderTabs() {
+            const el = document.getElementById('planTabs');
+            if (!el) return;
+            const plans = plansGet();
+            const activeId = planActiveId();
+            let html = plans.map(p => {
+                const total = Object.values(p.allocations || {}).reduce((s, v) => s + (parseFloat(v) || 0), 0);
+                const label = p.date ? formatDate(p.date) : 'No date yet';
+                const active = p.id === activeId;
+                return `<div class="filter-tab ${active ? 'active' : ''}" style="display:inline-flex;align-items:center;gap:8px;" onclick="planSelect(${p.id})"><span>${bfEscapeHtml(label)} · ${formatCurrency(p.amount || 0)}${total ? ` · ${formatCurrency(total)} planned` : ''}</span><span style="opacity:.55;cursor:pointer;margin-left:2px;" title="Remove this paycheck" onclick="event.stopPropagation();planDelete(${p.id})"><i class="fas fa-xmark"></i></span></div>`;
+            }).join('');
+            html += `<div class="filter-tab" style="display:inline-flex;align-items:center;gap:6px;color:var(--accent-blue);" onclick="planAdd()"><i class="fas fa-plus"></i> Add paycheck</div>`;
+            el.innerHTML = html;
         }
         function planFillAccounts() {
             const sel = document.getElementById('planPayAccount');
@@ -2188,36 +2243,37 @@
         }
         function planRenderLists() {
             planSyncInputs(); planFillAccounts();
-            const p = planRead();
+            const p = planActive();
             const totalAlloc = Object.values(p.allocations).reduce((s, v) => s + (parseFloat(v) || 0), 0);
             const leftover = Math.max(0, (p.amount || 0) - totalAlloc);
-            const win = planWindowBills();
-            const payRows = [], waitRows = [];
-            let waitingTotal = 0;
-            win.forEach(b => {
+            const payRows = Object.keys(p.allocations).map(id => {
+                const b = bills.find(x => x.id === parseInt(id));
+                if (!b) return null;
                 const owed = planBillRemaining(b);
-                const alloc = parseFloat(p.allocations[String(b.id)]) || 0;
-                if (alloc > 0) payRows.push({ b: b, owed: owed, alloc: Math.min(alloc, owed) });
-                else { waitRows.push({ b: b, owed: owed }); waitingTotal += owed; }
-            });
+                return { b: b, owed: owed, alloc: Math.min(parseFloat(p.allocations[id]) || 0, owed) };
+            }).filter(Boolean).sort((a, b2) => (a.b.dueDate < b2.b.dueDate ? -1 : 1));
+            const waitRows = planWindowBills().filter(b => p.allocations[String(b.id)] === undefined).map(b => ({ b: b, owed: planBillRemaining(b) }));
+            const waitingTotal = waitRows.reduce((s, r) => s + r.owed, 0);
             document.getElementById('planAllocated').textContent = formatCurrency(totalAlloc);
             document.getElementById('planLeftover').textContent = formatCurrency(leftover);
             document.getElementById('planWaiting').textContent = formatCurrency(waitingTotal);
+            const balInfo = b => b.isPayoff ? ` · balance ${formatCurrency(planBillBalance(b))} left` : '';
+            const overdueTag = b => b.status === 'overdue' ? ` · <span style='color:var(--accent-amber);'>overdue</span>` : '';
             const payEl = document.getElementById('planPayList');
             payEl.innerHTML = payRows.length ? payRows.map(r => {
                 const partial = r.alloc < r.owed - 0.005;
-                return `<div class="setting-row" style="align-items:center;"><div class="setting-info"><h4 style="font-size:14px;">${bfEscapeHtml(r.b.name)} <span style="color:var(--text-muted);font-weight:400;">· due ${formatDate(r.b.dueDate)}${r.b.status === 'overdue' ? ` · <span style='color:var(--accent-amber);'>overdue</span>` : ''}</span></h4><p>${formatCurrency(r.owed)} due${partial ? ` — <b style='color:var(--accent-amber);'>partial: ${formatCurrency(Math.max(0, r.owed - r.alloc))} still owed after this</b>` : ' — fully covered'}</p></div><div style="display:flex;gap:8px;align-items:center;"><input type="number" class="form-input" style="width:110px;" min="0" step="0.01" max="${r.owed}" value="${r.alloc}" onchange="planSetAlloc(${r.b.id}, this.value)"><button class="btn btn-secondary btn-sm" title="Wait until next paycheck" onclick="planSetAlloc(${r.b.id}, 0)"><i class="fas fa-xmark"></i></button></div></div>`;
+                return `<div class="setting-row" style="align-items:center;"><div class="setting-info"><h4 style="font-size:14px;">${bfEscapeHtml(r.b.name)} <span style="color:var(--text-muted);font-weight:400;">· due ${formatDate(r.b.dueDate)}${overdueTag(r.b)}</span></h4><p>Monthly payment ${formatCurrency(r.owed)}${balInfo(r.b)}${partial ? ` — <b style='color:var(--accent-amber);'>partial: ${formatCurrency(Math.max(0, r.owed - r.alloc))} of this month's payment still unplanned</b>` : ' — fully covered'}</p></div><div style="display:flex;gap:8px;align-items:center;"><input type="number" class="form-input" style="width:110px;" min="0" step="0.01" max="${r.owed}" value="${r.alloc}" onchange="planSetAlloc(${r.b.id}, this.value)"><button class="btn btn-secondary btn-sm" title="Wait until another paycheck" onclick="planSetAlloc(${r.b.id}, 0)"><i class="fas fa-xmark"></i></button></div></div>`;
             }).join('') : '<p style="color:var(--text-muted);font-size:13px;">Nothing planned yet — press <b>Auto plan</b> above, or add bills from the wait list below.</p>';
             const waitEl = document.getElementById('planWaitList');
-            waitEl.innerHTML = waitRows.length ? waitRows.map(r => `<div class="setting-row" style="align-items:center;"><div class="setting-info"><h4 style="font-size:14px;">${bfEscapeHtml(r.b.name)} <span style="color:var(--text-muted);font-weight:400;">· due ${formatDate(r.b.dueDate)}${r.b.status === 'overdue' ? ` · <span style='color:var(--accent-amber);'>overdue</span>` : ''}</span></h4><p>${formatCurrency(r.owed)} needed</p></div><button class="btn btn-secondary btn-sm" onclick="planAllocateFull(${r.b.id})"><i class="fas fa-plus"></i> Pay with paycheck</button></div>`).join('') : '<p style="color:var(--text-muted);font-size:13px;">Every bill due by the paycheck date is covered.</p>';
+            waitEl.innerHTML = waitRows.length ? waitRows.map(r => `<div class="setting-row" style="align-items:center;"><div class="setting-info"><h4 style="font-size:14px;">${bfEscapeHtml(r.b.name)} <span style="color:var(--text-muted);font-weight:400;">· due ${formatDate(r.b.dueDate)}${overdueTag(r.b)}</span></h4><p>Monthly payment ${formatCurrency(r.owed)}${balInfo(r.b)}</p></div><button class="btn btn-secondary btn-sm" onclick="planAllocateFull(${r.b.id})"><i class="fas fa-plus"></i> Pay with this paycheck</button></div>`).join('') : '<p style="color:var(--text-muted);font-size:13px;">Every bill due by this paycheck is either covered here or planned on another paycheck.</p>';
             const cutoff = p.date || new Date().toISOString().slice(0, 10);
-            const next = bills.filter(b => b.dueDate && b.dueDate > cutoff && planBillOwes(b)).sort((a, b2) => (a.dueDate < b2.dueDate ? -1 : 1)).slice(0, 8);
+            const next = bills.filter(b => b.dueDate && b.dueDate > cutoff && planBillOwes(b) && !planClaimedElsewhere(b.id, p.id) && p.allocations[String(b.id)] === undefined).sort((a, b2) => (a.dueDate < b2.dueDate ? -1 : 1)).slice(0, 8);
             const nextEl = document.getElementById('planNextList');
-            nextEl.innerHTML = next.length ? next.map(b => `<div class="setting-row" style="align-items:center;"><div class="setting-info"><h4 style="font-size:14px;">${bfEscapeHtml(b.name)}</h4><p>due ${formatDate(b.dueDate)}</p></div><div style="font-weight:600;">${formatCurrency(planBillRemaining(b))}</div></div>`).join('') : '<p style="color:var(--text-muted);font-size:13px;">No upcoming bills found.</p>';
+            nextEl.innerHTML = next.length ? next.map(b => `<div class="setting-row" style="align-items:center;"><div class="setting-info"><h4 style="font-size:14px;">${bfEscapeHtml(b.name)}</h4><p>due ${formatDate(b.dueDate)} · monthly ${formatCurrency(planBillRemaining(b))}</p></div><div style="font-weight:600;">${formatCurrency(planBillRemaining(b))}</div></div>`).join('') : '<p style="color:var(--text-muted);font-size:13px;">No upcoming bills found.</p>';
         }
         function planRecordPayments() {
             if (planReadOnly()) { showToast('👁️ View-only access.', 'info'); return; }
-            const p = planRead();
+            const p = planActive();
             const accId = parseInt(document.getElementById('planPayAccount').value);
             const date = document.getElementById('planPayDate').value;
             const acc = accounts.find(a => a.id === accId);
@@ -2239,7 +2295,7 @@
             saveData(); renderAll();
             showToast(paidOff ? `🎉 ${paidOff} fully paid off! ${formatCurrency(total)} total.` : `${formatCurrency(total)} paid across ${entries.length} bills from ${acc.name}.`, 'success');
         }
-        function renderPlan() { planRenderLists(); }
+        function renderPlan() { planRenderTabs(); planRenderLists(); }
         // DEBTS PAGE
         function renderDebts() {
             const debtBills = bills.filter(b => b.isPayoff);
@@ -2748,7 +2804,7 @@
         const BF_DEFAULT_BUDGETS = { housing:1500, utilities:350, subscriptions:100, insurance:200, debt:800, food:300, other:250 };
 
         function ensureState() {
-            if (!bfState) bfState = { appName: 'BillFlow', budgets: { ...BF_DEFAULT_BUDGETS }, paycheckPlan: { amount: 0, date: '', allocations: {} } };
+            if (!bfState) bfState = { appName: 'BillFlow', budgets: { ...BF_DEFAULT_BUDGETS }, paycheckPlans: [] };
         }
 
         function pushStateToServer() {
@@ -2759,7 +2815,7 @@
             fetch('/api/state/', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
-                body: JSON.stringify({ appName: getAppName(), budgets: getBudgets(), bills: bills, accounts: accounts, paycheckPlan: bfState.paycheckPlan || null })
+                body: JSON.stringify({ appName: getAppName(), budgets: getBudgets(), bills: bills, accounts: accounts, paycheckPlans: bfState.paycheckPlans || null })
             }).then(r => {
                 if (r.status === 403) { showToast('👁️ View-only access — changes are not saved.', 'info'); return; }
                 if (!r.ok) throw new Error('HTTP ' + r.status);
