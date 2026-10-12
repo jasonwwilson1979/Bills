@@ -205,6 +205,29 @@ ACCOUNT_EMAIL_VERIFICATION = 'none'
 # that page is ever shown (e.g. if this setting is ever changed).
 SOCIALACCOUNT_LOGIN_ON_GET = True
 
+# Always send errors to the console so gunicorn captures them in the container
+# logs (docker logs / Portainer). Django's default logging only prints errors
+# to the console while DEBUG=True, which makes production 500s impossible to
+# diagnose from the logs. This keeps full tracebacks visible at DEBUG=False.
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {'class': 'logging.StreamHandler'},
+    },
+    'loggers': {
+        # Unhandled exceptions -> full traceback in `docker logs`
+        'django.request': {
+            'handlers': ['console'], 'level': 'ERROR', 'propagate': False,
+        },
+        # Keep runserver's access lines working in local development
+        'django.server': {
+            'handlers': ['console'], 'level': 'INFO', 'propagate': False,
+        },
+    },
+    'root': {'handlers': ['console'], 'level': 'WARNING'},
+}
+
 # Create OAuth credentials at https://console.cloud.google.com and set
 # GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET before starting the server.
 # The authorized redirect URI to register there is:
