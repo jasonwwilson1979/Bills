@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BillFlow — Sign in</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0a0e1a; --bg-card: #1a2236; --border-color: #2a3550;
+            --text-primary: #f1f5f9; --text-muted: #64748b;
+            --accent-blue: #3b82f6; --accent-amber: #f59e0b;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: radial-gradient(ellipse at top, #14203a 0%, var(--bg-primary) 60%);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex; align-items: center; justify-content: center;
+            padding: 20px;
+        }
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            padding: 40px 36px;
+            width: 100%; max-width: 420px;
+            text-align: center;
+            box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+        }
+        .logo {
+            width: 64px; height: 64px; border-radius: 16px;
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6, #ec4899);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 26px; color: #fff; margin: 0 auto 18px;
+        }
+        h1 { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+        .sub { font-size: 13px; color: var(--text-muted); margin-bottom: 28px; }
+        .gbtn {
+            display: inline-flex; align-items: center; gap: 12px;
+            background: #ffffff; color: #1f2937;
+            font-family: inherit; font-size: 14px; font-weight: 600;
+            padding: 13px 24px; border-radius: 12px;
+            border: 0; cursor: pointer;
+            text-decoration: none; transition: all 0.2s;
+        }
+        .gbtn:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(255,255,255,0.15); }
+        .gbtn i.fab { color: #4285F4; font-size: 18px; }
+        .note { margin-top: 26px; font-size: 11.5px; color: var(--text-muted); line-height: 1.7; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="logo"><i class="fab fa-google"></i></div>
+        <h1>One more step</h1>
+        <p class="sub">You are about to sign in via {{ provider.name }}.</p>
+        <form method="post">
+            {% csrf_token %}
+            {% if redirect_field_value %}
+                <input type="hidden" name="{{ redirect_field_name }}" value="{{ redirect_field_value }}">
+            {% endif %}
+            <button class="gbtn" type="submit"><i class="fab fa-google"></i> Continue with {{ provider.name }}</button>
+        </form>
+        <p class="note"><i class="fas fa-lock"></i> You'll return to BillFlow right after signing in.</p>
+    </div>
+</body>
+</html>

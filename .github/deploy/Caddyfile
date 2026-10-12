@@ -1,0 +1,1 @@
+{`$BILLFLOW_DOMAIN} {`n    reverse_proxy web:8000`n}

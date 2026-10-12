@@ -1,0 +1,36 @@
+# BillFlow - deploy a PRE-BUILT image from GitHub Container Registry.
+#
+# The image is published by .github/workflows/docker-publish.yml on every
+# push to 'main'. Use this file when you do not want to build on the server
+# (e.g. deploying via Portainer).
+#
+# Replace OWNER/REPO below with your GitHub path (must be lowercase).
+#
+# On the server:
+#   sudo docker compose -f deploy/docker-compose.prebuilt.yml up -d
+# or paste it into Portainer (Stacks -> Add stack -> Web editor).
+
+services:
+  web:
+    image: ghcr.io/OWNER/REPO:latest
+    container_name: billflow-web
+    restart: unless-stopped
+    ports:
+      # Host port (BILLFLOW_PORT) and in-container port (BILLFLOW_CONTAINER_PORT)
+      # are both configurable via the stack's environment variables.
+      - "${BILLFLOW_PORT:-8000}:${BILLFLOW_CONTAINER_PORT:-8000}"
+    environment:
+      DJANGO_DB_PATH: /data/db.sqlite3
+      DJANGO_DEBUG: "False"
+      BILLFLOW_CONTAINER_PORT: ${BILLFLOW_CONTAINER_PORT:-8000}
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-}
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-*}
+      DJANGO_CSRF_TRUSTED_ORIGINS: ${DJANGO_CSRF_TRUSTED_ORIGINS:-}
+      DJANGO_SECURE_PROXY_SSL_HEADER: "1"
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+    volumes:
+      - billflow-data:/data
+
+volumes:
+  billflow-data:

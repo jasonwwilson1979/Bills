@@ -1085,7 +1085,24 @@
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="closeWithdrawalsModal()">Close</button>
                 <button class="btn btn-secondary" onclick="exportWithdrawals()"><i class="fas fa-download"></i> Export CSV</button>
+                <button class="btn btn-secondary" onclick="openSetBalanceModal()"><i class="fas fa-scale-balanced"></i> Set balance</button>
             </div>
+        </div>
+    </div>
+
+    <!-- SET BALANCE MODAL -->
+    <div class="modal-overlay" id="setBalanceModal" style="z-index:3000;">
+        <div class="modal" style="width:420px;">
+            <div class="modal-header"><h3 class="modal-title"><i class="fas fa-scale-balanced" style="color:var(--accent-blue);margin-right:8px;"></i>Set balance — <span id="setBalanceAccName"></span></h3><button class="modal-close" onclick="closeSetBalanceModal()"><i class="fas fa-times"></i></button></div>
+            <div class="modal-body">
+                <div style="background:var(--bg-input);border-radius:var(--radius-sm);padding:12px;margin-bottom:14px;font-size:13px;">
+                    <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-muted);">Balance in BillFlow</span><b id="setBalanceCurrent">$0.00</b></div>
+                    <div style="display:flex;justify-content:space-between;margin-top:6px;"><span style="color:var(--text-muted);">Difference</span><b id="setBalanceDiff">$0.00</b></div>
+                </div>
+                <div class="form-group"><label class="form-label">Your bank's current balance ($)</label><input type="number" class="form-input" id="setBalanceInput" step="0.01" oninput="updateSetBalanceDiff()"></div>
+                <p style="font-size:12px;color:var(--text-muted);">The bank is the source of truth: BillFlow's balance is set to this value, and an adjustment entry is recorded so the activity history explains the difference.</p>
+            </div>
+            <div class="modal-footer"><button class="btn btn-secondary" onclick="closeSetBalanceModal()">Cancel</button><button class="btn btn-pay" onclick="applySetBalance()"><i class="fas fa-check"></i> Set balance</button></div>
         </div>
     </div>
 
@@ -2583,11 +2600,36 @@
             });
             return out;
         }
+        function bankDetectFinalBalance(rows) {
+            // The bank's own running balance is the truth: figure out whether the
+            // file is oldest-first or newest-first by checking which order makes
+            // balance[i] = balance[i-1] - debit[i] + credit[i] hold, then take the
+            // chronologically LAST row's balance.
+            const bal = rows.filter(r => r.balance !== null);
+            if (!bal.length) return null;
+            if (bal.length === 1) { bankImportData.finalBalanceDate = bal[0].date; return bal[0].balance; }
+            const score = (seq) => {
+                let ok = 0, total = 0;
+                for (let i = 1; i < seq.length; i++) {
+                    if (seq[i - 1].balance === null || seq[i].balance === null) continue;
+                    total++;
+                    if (Math.abs((seq[i - 1].balance - seq[i].debit + seq[i].credit) - seq[i].balance) < 0.005) ok++;
+                }
+                return total ? ok / total : -1;
+            };
+            let seq = rows;
+            if (score(rows.slice().reverse()) > score(rows)) seq = rows.slice().reverse();
+            const chosen = seq.filter(r => r.balance !== null);
+            const last = chosen[chosen.length - 1];
+            bankImportData.finalBalanceDate = last.date;
+            return last.balance;
+        }
         function bankUpdatePreview() {
-            const rows = buildBankRows().sort((a, b) => (a.date < b.date ? -1 : 1));
+            const rowsFile = buildBankRows();
+            const rows = rowsFile.slice().sort((a, b) => (a.date < b.date ? -1 : 1));
             const inT = rows.reduce((s, r) => s + r.credit, 0), outT = rows.reduce((s, r) => s + r.debit, 0);
-            const balRows = rows.filter(r => r.balance !== null);
-            bankImportData.finalBalance = balRows.length ? balRows[balRows.length - 1].balance : null;
+            bankImportData.finalBalanceDate = '';
+            bankImportData.finalBalance = bankDetectFinalBalance(rowsFile);
             const autoLink = rows.filter(r => { const mk = descMatchKey(r.desc || r.note); return mk && bills.some(b => b.recurring && b.matchKey === mk); });
             const span = rows.length ? `${formatDate(rows[0].date)} → ${formatDate(rows[rows.length - 1].date)}` : '—';
             const cell = 'text-align:center;padding:10px;background:var(--bg-input);border-radius:var(--radius-sm);';
@@ -2596,7 +2638,7 @@
                 <div style="${cell}"><div style="font-size:11px;color:var(--text-muted);">Credits (in)</div><div style="font-size:16px;font-weight:800;color:var(--accent-green);">+${formatCurrency(inT)}</div></div>
                 <div style="${cell}"><div style="font-size:11px;color:var(--text-muted);">Debits (out)</div><div style="font-size:16px;font-weight:800;color:var(--accent-red);">-${formatCurrency(outT)}</div></div>
                 <div style="${cell}"><div style="font-size:11px;color:var(--text-muted);">Statement balance</div><div style="font-size:16px;font-weight:800;color:var(--accent-blue);">${bankImportData.finalBalance === null ? 'n/a' : formatCurrency(bankImportData.finalBalance)}</div></div></div>
-                <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0;">Span: ${span}. Credits become deposits, debits become bank transactions; duplicates and debits matching an existing bill payment are skipped.${autoLink.length ? ` <b style="color:var(--accent-blue);">${autoLink.length} row(s) will auto-pay existing bills.</b>` : ''}${bankImportData.finalBalance === null ? ' No Balance column — amounts apply on top of the current balance.' : ` Balance will be set to the statement balance (${formatCurrency(bankImportData.finalBalance)}).`}</p>`;
+                <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0;">Span: ${span}. Credits become deposits, debits become bank transactions; duplicates and debits matching an existing bill payment are skipped.${autoLink.length ? ` <b style="color:var(--accent-blue);">${autoLink.length} row(s) will auto-pay existing bills.</b>` : ''}${bankImportData.finalBalance === null ? ' No Balance column — amounts apply on top of the current balance.' : ` Balance will be set to the statement balance (${formatCurrency(bankImportData.finalBalance)}${bankImportData.finalBalanceDate ? ', as of ' + formatDate(bankImportData.finalBalanceDate) : ''}).`}</p>`;
             const tail = rows.slice(-30).reverse();
             document.getElementById('bankImportPreview').innerHTML = rows.length ? `<table class="bank-table"><thead><tr><th>Date</th><th>Description</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead><tbody>${tail.map(r => `<tr><td>${formatDate(r.date)}</td><td class="clip">${bfEscapeHtml(r.note)}${(() => { const mk = descMatchKey(r.desc || r.note); const mb = mk ? bills.find(b => b.recurring && b.matchKey === mk) : null; return mb ? ` <span style="color:var(--accent-blue);">→ ${bfEscapeHtml(mb.name)}</span>` : ''; })()}</td><td style="color:var(--accent-red);">${r.debit ? formatCurrency(r.debit) : ''}</td><td style="color:var(--accent-green);">${r.credit ? formatCurrency(r.credit) : ''}</td><td>${r.balance === null ? '' : formatCurrency(r.balance)}</td></tr>`).join('')}</tbody></table><p style="font-size:11px;color:var(--text-muted);margin:6px 0 0;">Showing the ${Math.min(30, rows.length)} most recent of ${rows.length} row(s).</p>` : '<p style="color:var(--accent-red);font-size:13px;">No rows with a valid date and amount were found — check the column mapping above.</p>';
         }
@@ -2698,6 +2740,44 @@
             saveData(); closeTagBillModal(); renderAll();
             if (currentWithdrawalAccountId) { renderWithdrawalYearTabs(); renderWithdrawalsList(); }
             showToast(msg, 'success');
+        }
+        // ============ SET BALANCE (the bank is the source of truth) ============
+        let setBalanceAccId = null;
+        function openSetBalanceModal() {
+            if (viewOnlyMode()) { showToast('👁️ View-only access.', 'info'); return; }
+            const acc = accounts.find(a => a.id === currentWithdrawalAccountId); if (!acc) return;
+            setBalanceAccId = acc.id;
+            document.getElementById('setBalanceAccName').textContent = acc.name;
+            document.getElementById('setBalanceCurrent').textContent = formatCurrency(acc.balance);
+            document.getElementById('setBalanceInput').value = '';
+            document.getElementById('setBalanceDiff').textContent = formatCurrency(0);
+            document.getElementById('setBalanceDiff').style.color = 'var(--text-primary)';
+            document.getElementById('setBalanceModal').classList.add('active');
+        }
+        function closeSetBalanceModal() { document.getElementById('setBalanceModal').classList.remove('active'); setBalanceAccId = null; }
+        function updateSetBalanceDiff() {
+            const acc = accounts.find(a => a.id === setBalanceAccId); if (!acc) return;
+            const v = parseFloat(document.getElementById('setBalanceInput').value);
+            const diff = Math.round(((isNaN(v) ? acc.balance : v) - acc.balance) * 100) / 100;
+            const el = document.getElementById('setBalanceDiff');
+            el.textContent = (diff > 0 ? '+' : '') + formatCurrency(diff);
+            el.style.color = diff > 0 ? 'var(--accent-green)' : diff < 0 ? 'var(--accent-red)' : 'var(--text-primary)';
+        }
+        function applySetBalance() {
+            if (viewOnlyMode()) { showToast('👁️ View-only access.', 'info'); return; }
+            const acc = accounts.find(a => a.id === setBalanceAccId); if (!acc) return;
+            const target = parseFloat(document.getElementById('setBalanceInput').value);
+            if (isNaN(target)) { showToast('Enter your bank\'s current balance.', 'error'); return; }
+            const diff = Math.round((target - acc.balance) * 100) / 100;
+            const today = new Date().toISOString().slice(0, 10);
+            if (Math.abs(diff) >= 0.005) {
+                if (diff > 0) { acc.deposits = acc.deposits || []; acc.deposits.push({ date: today, amount: diff, note: 'Balance adjustment — match bank' }); }
+                else { acc.debits = acc.debits || []; acc.debits.push({ date: today, amount: -diff, note: 'Balance adjustment — match bank' }); }
+            }
+            acc.balance = Math.round(target * 100) / 100;
+            saveData(); closeSetBalanceModal(); renderAll();
+            if (currentWithdrawalAccountId) { renderWithdrawalYearTabs(); renderWithdrawalsList(); }
+            showToast(`${acc.name} balance set to ${formatCurrency(acc.balance)} — the bank is now the source of truth.`, 'success');
         }
         function renderDebts() {
             const debtBills = bills.filter(b => b.isPayoff);
@@ -3195,8 +3275,9 @@
         document.getElementById('unpayModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeUnpayModal();});
         document.getElementById('depositModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeDepositModal();});
         document.getElementById('bankImportModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeBankImportModal();});
+        document.getElementById('setBalanceModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeSetBalanceModal();});
         document.getElementById('budgetEditModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeBudgetEditModal();});
-        document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();closePaymentModal();closeBulkPaymentModal();closeAccountModal();closeUnpayModal();closeBudgetEditModal();closeDepositModal();closeBankImportModal();closeImportPreviewModal();closeImportModal();}if(e.key==='n'&&e.ctrlKey){e.preventDefault();openModal();}});
+        document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();closePaymentModal();closeBulkPaymentModal();closeAccountModal();closeUnpayModal();closeBudgetEditModal();closeDepositModal();closeBankImportModal();closeSetBalanceModal();closeImportPreviewModal();closeImportModal();}if(e.key==='n'&&e.ctrlKey){e.preventDefault();openModal();}});
 
         // ============================================================
         // SERVER-SYNCED STATE (replaces the old localStorage store)
