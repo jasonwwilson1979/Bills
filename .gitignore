@@ -6,3 +6,5 @@ staticfiles/
 .env
 data/
 *.log
+vars.txt
+vars*.txt
