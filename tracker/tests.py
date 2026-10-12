@@ -414,3 +414,24 @@ class CustomCategoryTests(TestCase):
         self._put({'appName': 'B', 'budgets': {}, 'bills': [], 'accounts': [], 'customCategories': None})
         g = self.client.get('/api/state/')
         self.assertIsNone(g.json()['data']['customCategories'])
+
+
+class TemplateScriptTests(TestCase):
+    def test_every_inline_handler_is_defined_in_template(self):
+        """Catches onclick/onchange/oninput handlers pointing at functions that
+        were never defined (which would silently break clicks at runtime)."""
+        import re
+
+        from django.conf import settings
+
+        path = os.path.join(str(settings.BASE_DIR), 'templates', 'tracker', 'app.html')
+        with open(path, encoding='utf-8') as fh:
+            html = fh.read()
+        handlers = set()
+        for attr in re.findall(r'on(?:click|change|input)="([^"]+)"', html):
+            for call in re.findall(r'(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(', attr):
+                handlers.add(call)
+        defined = set(re.findall(r'function\s+([A-Za-z_$][\w$]*)\s*\(', html))
+        builtins = {'confirm', 'parseFloat', 'parseInt', 'String', 'stopPropagation', 'preventDefault'}
+        missing = sorted(h for h in handlers if h not in defined and h not in builtins)
+        self.assertEqual(missing, [], f'inline handlers not defined in app.html: {missing}')

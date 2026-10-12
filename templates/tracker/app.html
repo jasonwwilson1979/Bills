@@ -1759,6 +1759,16 @@
             return withdrawals;
         }
 
+        function getAllAccountActivity(accountId) {
+            const rows = [];
+            const acc = accounts.find(a => a.id === accountId);
+            (acc && acc.deposits ? acc.deposits : []).forEach(d => rows.push({ date: d.date, amount: d.amount, type: 'in', label: d.note || 'Deposit', billName: '', category: '', note: d.note || '' }));
+            bills.forEach(bill => (bill.payments || []).forEach(p => {
+                if (p.accountId === accountId) rows.push({ date: p.date, amount: p.amount, type: 'out', label: bill.name, billName: bill.name, category: bill.category, note: p.note || '' });
+            }));
+            rows.sort((a, b) => (a.date < b.date ? 1 : -1));
+            return rows;
+        }
         function renderWithdrawalYearTabs() {
             const el = document.getElementById('withdrawalYearTabs');
             if (!el || !currentWithdrawalAccountId) return;
