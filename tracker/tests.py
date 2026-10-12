@@ -282,3 +282,33 @@ class EnsureAdminTests(TestCase):
 
     def test_noop_when_env_unset(self):
         call_command('ensure_admin', verbosity=0)
+
+
+class BrandTests(TestCase):
+    def test_favicon_static_file_exists(self):
+        from django.contrib.staticfiles import finders
+        self.assertIsNotNone(finders.find('tracker/favicon.svg'))
+
+    def test_login_page_shows_dollar_logo_and_favicon(self):
+        r = self.client.get('/accounts/login/')
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('fa-dollar-sign', body)
+        self.assertIn('favicon.svg', body)
+        self.assertNotIn('fa-bolt', body)
+
+    def test_app_page_shows_dollar_logo_and_favicon(self):
+        u = User.objects.create_user(username='brand', email='brand@example.com', password='pw123456789')
+        self.client.force_login(u)
+        r = self.client.get('/')
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('fa-dollar-sign', body)
+        self.assertIn('favicon.svg', body)
+
+    @override_settings(DEBUG=True)
+    def test_favicon_is_served(self):
+        r = self.client.get('/static/tracker/favicon.svg')
+        self.assertEqual(r.status_code, 200)
+        body = b''.join(r.streaming_content)
+        self.assertIn(b'<svg', body)

@@ -1,9 +1,10 @@
-<!DOCTYPE html>
+{% load static %}<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title id="appTitleTag">BillFlow — Smart Bill Tracker</title>
+    <link rel="icon" type="image/svg+xml" href="{% static 'tracker/favicon.svg' %}">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <style>
@@ -464,7 +465,7 @@
 <body>
     <div class="app-container">
         <aside class="sidebar" id="sidebar">
-            <div class="logo"><div class="logo-icon"><i class="fas fa-bolt"></i></div><span class="logo-text" id="sidebarAppName">BillFlow</span></div>
+            <div class="logo"><div class="logo-icon"><i class="fas fa-dollar-sign"></i></div><span class="logo-text" id="sidebarAppName">BillFlow</span></div>
             <div class="nav-section">
                 <div class="nav-section-title">Overview</div>
                 <div class="nav-item active" data-page="dashboard" onclick="switchPage('dashboard')"><i class="fas fa-th-large"></i> Dashboard</div>
