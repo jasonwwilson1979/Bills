@@ -198,6 +198,44 @@ Any one of these fixes it:
   auto-generates a strong key and persists it in the data volume (see
   `billflow/settings.py`).
 
+## Troubleshooting: Google sign-in fails with "Error 400: redirect_uri_mismatch"
+
+Google only redirects to URIs that are registered **exactly** on your OAuth
+client. The app builds its callback from the incoming request, so the URL it
+sends is:
+
+```
+https://YOUR-DOMAIN/accounts/google/login/callback/
+```
+
+**To see what was actually sent:** on Google's error page click
+*see error details / Error details* — it shows the exact `redirect_uri`.
+That string must match a registered URI character-for-character (scheme, host,
+port, path, trailing slash).
+
+Common causes:
+
+- **The production URI was never added** — registering only
+  `http://localhost:8000/...` (for local dev) is not enough.
+- **`http://` vs `https://`** — behind Cloudflare or any TLS-terminating proxy
+  the app needs `DJANGO_SECURE_PROXY_SSL_HEADER=1` in the stack environment,
+  otherwise Django builds `http://YOUR-DOMAIN/...` and Google always rejects
+  that for anything except localhost. After changing a stack variable,
+  *Recreate / re-deploy* the stack for it to take effect.
+- **`www.` vs bare domain** — `https://www.example.com/...` and
+  `https://example.com/...` are different URIs; register the one your browser
+  actually shows.
+- **Wrong path** — it must end with `/accounts/google/login/callback/`
+  (with trailing slash), not `/accounts/google/callback/` or `/oauth2/...`.
+- **A port in the URL** — if you access the app as `:8090`, the registered URI
+  must include it. Plain-HTTP + raw-IP never works (except `localhost`).
+
+**Fix:** Google Cloud Console → *APIs & Services → Credentials* → click your
+OAuth 2.0 Client ID → *Authorized redirect URIs* → add the exact URI(s) →
+*Save* (propagation usually takes a few minutes). While there, also make sure
+`DJANGO_CSRF_TRUSTED_ORIGINS=https://YOUR-DOMAIN` is set in the stack — the
+callback POST needs it too, and without it you'd next see a CSRF error.
+
 ## Running the tests
 
 ```powershell

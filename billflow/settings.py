@@ -198,6 +198,13 @@ ACCOUNT_LOGOUT_REDIRECT_URL = '/'
 # email-confirmation flow (which would need an SMTP server).
 ACCOUNT_EMAIL_VERIFICATION = 'none'
 
+# Clicking "Continue with Google" goes straight to Google with no intermediate
+# allauth "Sign In Via Google" confirmation page in between (newer allauth
+# defaults this to False, which shows an unstyled intermediate page).
+# The fallback template in templates/socialaccount/ is still styled in case
+# that page is ever shown (e.g. if this setting is ever changed).
+SOCIALACCOUNT_LOGIN_ON_GET = True
+
 # Create OAuth credentials at https://console.cloud.google.com and set
 # GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET before starting the server.
 # The authorized redirect URI to register there is:

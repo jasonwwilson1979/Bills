@@ -35,6 +35,29 @@ class AuthFlowTests(TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertIn('/accounts/google/login/', r.content.decode())
 
+    @override_settings(SOCIALACCOUNT_PROVIDERS=FAKE_GOOGLE)
+    def test_google_login_get_redirects_straight_to_google(self):
+        # SOCIALACCOUNT_LOGIN_ON_GET = True: no intermediate confirmation page
+        r = self.client.get('/accounts/google/login/')
+        self.assertEqual(r.status_code, 302)
+        self.assertIn('accounts.google.com', r['Location'])
+
+    @override_settings(
+        SOCIALACCOUNT_PROVIDERS=FAKE_GOOGLE, SOCIALACCOUNT_LOGIN_ON_GET=False
+    )
+    def test_intermediate_page_is_styled_and_still_works(self):
+        # Fallback path (setting off): our own styled template must render,
+        # not allauth's bare default (which shows an odd "Menu:" block).
+        r = self.client.get('/accounts/google/login/')
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('Continue with Google', body)
+        self.assertNotIn('<strong>Menu:</strong>', body)
+        # And the form must still complete the flow when posted
+        r2 = self.client.post('/accounts/google/login/')
+        self.assertEqual(r2.status_code, 302)
+        self.assertIn('accounts.google.com', r2['Location'])
+
     def test_logout_then_home_requires_login_again(self):
         user = User.objects.create_user(username='jason', password='pw123456789')
         self.client.force_login(user)
