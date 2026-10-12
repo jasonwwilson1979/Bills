@@ -328,6 +328,11 @@
         .cat-c-red { background:rgba(239,68,68,0.15); color:var(--accent-red); }
         .cat-c-pink { background:rgba(236,72,153,0.15); color:var(--accent-pink); }
         .cat-c-gray { background:rgba(100,116,139,0.15); color:var(--text-muted); }
+        .bank-table { width:100%; font-size:12px; border-collapse:collapse; }
+        .bank-table th { text-align:left; color:var(--text-muted); padding:6px 4px; border-bottom:1px solid var(--border-color); }
+        .bank-table td { padding:6px 4px; border-bottom:1px solid var(--border-color); }
+        .bank-table th:nth-child(n+3), .bank-table td:nth-child(n+3) { text-align:right; }
+        .bank-table td.clip { max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
         .stat-card { animation:fadeInUp 0.5s ease backwards; }
         .stat-card:nth-child(1) { animation-delay:0.05s; } .stat-card:nth-child(2) { animation-delay:0.1s; }
@@ -1001,6 +1006,29 @@
                 </div>
             </div>
             <div class="modal-footer"><button class="btn btn-secondary" onclick="closeDepositModal()">Cancel</button><button class="btn btn-pay" onclick="recordDeposit()"><i class="fas fa-check"></i> Add Deposit</button></div>
+        </div>
+    </div>
+
+    <!-- BANK IMPORT MODAL -->
+    <div class="modal-overlay" id="bankImportModal">
+        <div class="modal" style="width:660px;">
+            <div class="modal-header"><h3 class="modal-title"><i class="fas fa-file-csv" style="color:var(--accent-blue);margin-right:8px;"></i>Import bank data — <span id="bankImportAccName"></span></h3><button class="modal-close" onclick="closeBankImportModal()"><i class="fas fa-times"></i></button></div>
+            <div class="modal-body" style="max-height:65vh;overflow-y:auto;">
+                <div class="form-group">
+                    <label class="form-label">Bank statement (CSV)</label>
+                    <input type="file" class="form-input" id="bankImportFile" accept=".csv,text/csv" onchange="handleBankFileSelect(this)">
+                </div>
+                <div id="bankImportSetup" style="display:none;">
+                    <h3 class="settings-section-title">Column mapping</h3>
+                    <div id="bankMappingFields" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;"></div>
+                    <div id="bankImportSummary" style="margin:14px 0;"></div>
+                    <div id="bankImportPreview"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeBankImportModal()">Cancel</button>
+                <button class="btn btn-pay" id="bankImportBtn" onclick="applyBankImport()" style="display:none;"><i class="fas fa-file-import"></i> Import transactions</button>
+            </div>
         </div>
     </div>
 
@@ -1762,9 +1790,10 @@
         function getAllAccountActivity(accountId) {
             const rows = [];
             const acc = accounts.find(a => a.id === accountId);
-            (acc && acc.deposits ? acc.deposits : []).forEach(d => rows.push({ date: d.date, amount: d.amount, type: 'in', label: d.note || 'Deposit', billName: '', category: '', note: d.note || '' }));
+            (acc && acc.deposits ? acc.deposits : []).forEach(d => rows.push({ date: d.date, amount: d.amount, type: 'in', source: 'deposit', label: d.note || 'Deposit', billName: '', category: '', note: d.note || '' }));
+            (acc && acc.debits ? acc.debits : []).forEach(d => rows.push({ date: d.date, amount: d.amount, type: 'out', source: 'bank', label: d.note || 'Bank transaction', billName: '', category: '', note: d.note || '' }));
             bills.forEach(bill => (bill.payments || []).forEach(p => {
-                if (p.accountId === accountId) rows.push({ date: p.date, amount: p.amount, type: 'out', label: bill.name, billName: bill.name, category: bill.category, note: p.note || '' });
+                if (p.accountId === accountId) rows.push({ date: p.date, amount: p.amount, type: 'out', source: 'bill', label: bill.name, billName: bill.name, category: bill.category, note: p.note || '' });
             }));
             rows.sort((a, b) => (a.date < b.date ? 1 : -1));
             return rows;
@@ -1836,7 +1865,7 @@
                             <div style="width:32px;height:32px;border-radius:var(--radius-sm);background:${isIn ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)'};display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fas ${isIn ? 'fa-arrow-down' : 'fa-arrow-up'}" style="font-size:11px;color:${isIn ? 'var(--accent-green)' : 'var(--accent-red)'};"></i></div>
                             <div style="min-width:0;"><div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${bfEscapeHtml(r.label)}</div><div style="font-size:11px;color:var(--text-muted);">${formatDate(r.date)}${r.note && r.note !== r.label ? ' · ' + bfEscapeHtml(r.note) : ''}${!isIn && cat ? ` · <span class="category-tag ${cat.class}">${cat.label}</span>` : ''}</div></div>
                         </div>
-                        <div style="text-align:right;flex-shrink:0;"><div style="font-size:14px;font-weight:700;color:${isIn ? 'var(--accent-green)' : 'var(--text-primary)'};">${isIn ? '+' : '-'}${formatCurrency(r.amount)}</div><div style="font-size:10px;color:var(--text-muted);">${isIn ? 'Deposit' : 'Bill payment'}</div></div>
+                        <div style="text-align:right;flex-shrink:0;"><div style="font-size:14px;font-weight:700;color:${isIn ? 'var(--accent-green)' : 'var(--text-primary)'};">${isIn ? '+' : '-'}${formatCurrency(r.amount)}</div><div style="font-size:10px;color:var(--text-muted);">${r.source === 'deposit' ? 'Deposit' : r.source === 'bank' ? 'Bank transaction' : 'Bill payment'}</div></div>
                     </div>`;
                 });
                 html += '</div>';
@@ -1887,9 +1916,9 @@
                 }).reduce((s, w) => s + w.amount, 0);
 
                 return `<div class="account-card ${a.color||'blue'}">
-                    <div class="account-header"><div class="account-icon"><i class="fas ${accountIcons[a.type]||'fa-university'}"></i></div><div style="display:flex;gap:8px;"><button class="action-btn" style="background:rgba(16,185,129,0.15);color:var(--accent-green);" onclick="openDepositModal(${a.id})" title="Deposit"><i class="fas fa-arrow-down"></i></button><button class="action-btn edit" onclick="editAccount(${a.id})" title="Edit"><i class="fas fa-pen"></i></button><button class="action-btn delete" onclick="deleteAccount(${a.id})" title="Delete"><i class="fas fa-trash"></i></button></div></div>
+                    <div class="account-header"><div class="account-icon"><i class="fas ${accountIcons[a.type]||'fa-university'}"></i></div><div style="display:flex;gap:8px;"><button class="action-btn" style="background:rgba(59,130,246,0.15);color:var(--accent-blue);" onclick="openBankImportModal(${a.id})" title="Import bank data"><i class="fas fa-file-csv"></i></button><button class="action-btn" style="background:rgba(16,185,129,0.15);color:var(--accent-green);" onclick="openDepositModal(${a.id})" title="Deposit"><i class="fas fa-arrow-down"></i></button><button class="action-btn edit" onclick="editAccount(${a.id})" title="Edit"><i class="fas fa-pen"></i></button><button class="action-btn delete" onclick="deleteAccount(${a.id})" title="Delete"><i class="fas fa-trash"></i></button></div></div>
                     <div class="account-balance">${formatCurrency(a.balance)}</div><div class="account-name">${a.name}</div><div class="account-type">${a.type}</div>
-                    <div class="account-withdrawals-summary">${withdrawals.length > 0 ? `${withdrawals.length} payment${withdrawals.length > 1 ? 's' : ''} · -${formatCurrency(totalWithdrawn)} total` : 'No payments yet'}${(a.deposits||[]).length ? ` · <span style="color:var(--accent-green);">${(a.deposits||[]).length} deposit${(a.deposits||[]).length > 1 ? 's' : ''}</span>` : ''}</div>
+                    <div class="account-withdrawals-summary">${withdrawals.length > 0 ? `${withdrawals.length} payment${withdrawals.length > 1 ? 's' : ''} · -${formatCurrency(totalWithdrawn)} total` : 'No payments yet'}${(a.deposits||[]).length ? ` · <span style="color:var(--accent-green);">${(a.deposits||[]).length} deposit${(a.deposits||[]).length > 1 ? 's' : ''}</span>` : ''}${(a.debits||[]).length ? ` · ${(a.debits||[]).length} bank transaction${(a.debits||[]).length > 1 ? 's' : ''}` : ''}</div>
                     <div class="account-view-withdrawals" onclick="openWithdrawalsModal(${a.id})"><i class="fas fa-list"></i> View all activity by year</div>
                 </div>`;
             }).join('');
@@ -2428,6 +2457,125 @@
             saveData(); closeDepositModal(); renderAll();
             showToast(`${formatCurrency(amount)} deposited to ${acc.name}.`, 'success');
         }
+
+        // ============ BANK DATA IMPORT ============
+        let bankImportAccId = null;
+        let bankImportData = null;
+        const BANK_FIELD_DEFS = [
+            { key: 'date', label: 'Date', required: true, hints: ['date', 'postingdate', 'transactiondate', 'transdate', 'postdate', 'dated'] },
+            { key: 'description', label: 'Description', hints: ['description', 'desc', 'memo', 'payee', 'name', 'details', 'transaction', 'narrative', 'transactiondescription'] },
+            { key: 'debit', label: 'Debit (money out)', hints: ['debit', 'debitamount', 'withdrawal', 'withdrawalamount', 'withdrawals'] },
+            { key: 'credit', label: 'Credit (money in)', hints: ['credit', 'creditamount', 'deposit', 'depositamount', 'deposits'] },
+            { key: 'amount', label: 'Amount (single column)', hints: ['amount', 'amt', 'transactionamount', 'value'] },
+            { key: 'type', label: 'Type', hints: ['type', 'transtype', 'transactiontype', 'drcr', 'debitcredit'] },
+            { key: 'balance', label: 'Balance', hints: ['balance', 'runningbalance', 'bal', 'currentbalance'] },
+            { key: 'chkref', label: 'Check / Ref #', hints: ['chkref', 'check', 'checknumber', 'chk', 'ref', 'reference', 'referencenumber'] },
+            { key: 'account', label: 'Account', hints: ['account', 'acct', 'accountname', 'accountnumber', 'accountid'] },
+        ];
+        function openBankImportModal(accId) {
+            if (viewOnlyMode()) { showToast('👁️ View-only access.', 'info'); return; }
+            const acc = accounts.find(a => a.id === accId); if (!acc) return;
+            bankImportAccId = accId;
+            bankImportData = null;
+            document.getElementById('bankImportAccName').textContent = acc.name;
+            document.getElementById('bankImportFile').value = '';
+            document.getElementById('bankImportSetup').style.display = 'none';
+            document.getElementById('bankImportBtn').style.display = 'none';
+            document.getElementById('bankImportSummary').innerHTML = '';
+            document.getElementById('bankImportPreview').innerHTML = '';
+            document.getElementById('bankImportModal').classList.add('active');
+        }
+        function closeBankImportModal() { document.getElementById('bankImportModal').classList.remove('active'); bankImportAccId = null; bankImportData = null; }
+        function handleBankFileSelect(inp) {
+            const file = inp.files && inp.files[0];
+            inp.value = '';
+            if (!file) return;
+            if (!/\.csv$/i.test(file.name) && file.type !== 'text/csv') { showToast('Please choose a .csv file.', 'error'); return; }
+            const reader = new FileReader();
+            reader.onload = e => { try { bankLoadCsv(e.target.result, file.name); } catch (err) { showToast('Could not read that file: ' + err.message, 'error'); } };
+            reader.onerror = () => showToast('Could not read that file.', 'error');
+            reader.readAsText(file);
+        }
+        function bankLoadCsv(text, fileName) {
+            const rows = parseCSV(text, sniffDelimiter(String(text).split(/\r?\n/)[0] || ''));
+            if (rows.length < 2) { showToast('That file appears to have no data rows.', 'error'); return; }
+            const headers = rows[0].map(h => String(h).trim());
+            const dataRows = rows.slice(1).filter(r => r.some(c => String(c).trim() !== ''));
+            if (!dataRows.length) { showToast('No data rows found.', 'error'); return; }
+            const mapping = {};
+            BANK_FIELD_DEFS.forEach(f => {
+                const idx = headers.findIndex(h => f.hints.indexOf(normHeader(h)) !== -1);
+                mapping[f.key] = idx === -1 ? '' : String(idx);
+            });
+            bankImportData = { fileName: fileName, headers: headers, rows: dataRows, mapping: mapping, finalBalance: null };
+            document.getElementById('bankImportSetup').style.display = 'block';
+            renderBankMapping();
+            bankMappingChanged();
+        }
+        function renderBankMapping() {
+            const el = document.getElementById('bankMappingFields');
+            el.innerHTML = BANK_FIELD_DEFS.map(f => `<div><label class="form-label" style="font-size:11px;">${f.label}${f.required ? ' *' : ''}</label><select class="form-select" style="width:100%;" onchange="bankMappingChanged()" data-bankfield="${f.key}"><option value="">— not present —</option>${bankImportData.headers.map((h, i) => `<option value="${i}" ${String(i) === bankImportData.mapping[f.key] ? 'selected' : ''}>${bfEscapeHtml(h || 'Column ' + (i + 1))}</option>`).join('')}</select></div>`).join('');
+        }
+        function bankMappingChanged() {
+            document.querySelectorAll('#bankMappingFields select').forEach(sel => { bankImportData.mapping[sel.getAttribute('data-bankfield')] = sel.value; });
+            const ok = bankImportData.mapping.date !== '' && (bankImportData.mapping.debit !== '' || bankImportData.mapping.credit !== '' || bankImportData.mapping.amount !== '');
+            document.getElementById('bankImportBtn').style.display = ok ? 'inline-flex' : 'none';
+            bankUpdatePreview();
+        }
+        function buildBankRows() {
+            const mp = bankImportData.mapping, get = (row, key) => (mp[key] === '' ? null : row[+mp[key]]), out = [];
+            bankImportData.rows.forEach(row => {
+                const date = parseDateValue(get(row, 'date'));
+                const chk = String(get(row, 'chkref') || '').trim();
+                const balRaw = get(row, 'balance');
+                const balance = (balRaw === null || balRaw === '') ? null : parseAmountValue(balRaw);
+                let debit = Math.abs(parseAmountValue(get(row, 'debit')) || 0);
+                let credit = Math.abs(parseAmountValue(get(row, 'credit')) || 0);
+                if (mp.debit === '' && mp.credit === '' && mp.amount !== '') {
+                    const amt = parseAmountValue(get(row, 'amount')), typeS = String(get(row, 'type') || '').toLowerCase();
+                    if (amt !== null) { if (amt < 0) debit = -amt; else if (typeS.includes('debit') || typeS.includes('withdrawal')) debit = Math.abs(amt); else credit = Math.abs(amt); }
+                }
+                let note = String(get(row, 'description') || '').trim() || 'Bank transaction';
+                if (chk) note = ('#' + chk + ' · ' + note).slice(0, 80);
+                if (date && (debit > 0.005 || credit > 0.005)) out.push({ date, note, debit: Math.round(debit * 100) / 100, credit: Math.round(credit * 100) / 100, balance: (balance === null || isNaN(balance)) ? null : Math.round(balance * 100) / 100 });
+            });
+            return out;
+        }
+        function bankUpdatePreview() {
+            const rows = buildBankRows().sort((a, b) => (a.date < b.date ? -1 : 1));
+            const inT = rows.reduce((s, r) => s + r.credit, 0), outT = rows.reduce((s, r) => s + r.debit, 0);
+            const balRows = rows.filter(r => r.balance !== null);
+            bankImportData.finalBalance = balRows.length ? balRows[balRows.length - 1].balance : null;
+            const span = rows.length ? `${formatDate(rows[0].date)} → ${formatDate(rows[rows.length - 1].date)}` : '—';
+            const cell = 'text-align:center;padding:10px;background:var(--bg-input);border-radius:var(--radius-sm);';
+            document.getElementById('bankImportSummary').innerHTML = `<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
+                <div style="${cell}"><div style="font-size:11px;color:var(--text-muted);">Transactions</div><div style="font-size:16px;font-weight:800;">${rows.length}</div></div>
+                <div style="${cell}"><div style="font-size:11px;color:var(--text-muted);">Credits (in)</div><div style="font-size:16px;font-weight:800;color:var(--accent-green);">+${formatCurrency(inT)}</div></div>
+                <div style="${cell}"><div style="font-size:11px;color:var(--text-muted);">Debits (out)</div><div style="font-size:16px;font-weight:800;color:var(--accent-red);">-${formatCurrency(outT)}</div></div>
+                <div style="${cell}"><div style="font-size:11px;color:var(--text-muted);">Statement balance</div><div style="font-size:16px;font-weight:800;color:var(--accent-blue);">${bankImportData.finalBalance === null ? 'n/a' : formatCurrency(bankImportData.finalBalance)}</div></div></div>
+                <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0;">Span: ${span}. Credits become deposits, debits become bank transactions; duplicates and debits matching an existing bill payment are skipped.${bankImportData.finalBalance === null ? ' No Balance column — amounts apply on top of the current balance.' : ` Balance will be set to the statement balance (${formatCurrency(bankImportData.finalBalance)}).`}</p>`;
+            const tail = rows.slice(-30).reverse();
+            document.getElementById('bankImportPreview').innerHTML = rows.length ? `<table class="bank-table"><thead><tr><th>Date</th><th>Description</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead><tbody>${tail.map(r => `<tr><td>${formatDate(r.date)}</td><td class="clip">${bfEscapeHtml(r.note)}</td><td style="color:var(--accent-red);">${r.debit ? formatCurrency(r.debit) : ''}</td><td style="color:var(--accent-green);">${r.credit ? formatCurrency(r.credit) : ''}</td><td>${r.balance === null ? '' : formatCurrency(r.balance)}</td></tr>`).join('')}</tbody></table><p style="font-size:11px;color:var(--text-muted);margin:6px 0 0;">Showing the ${Math.min(30, rows.length)} most recent of ${rows.length} row(s).</p>` : '<p style="color:var(--accent-red);font-size:13px;">No rows with a valid date and amount were found — check the column mapping above.</p>';
+        }
+        function applyBankImport() {
+            if (viewOnlyMode()) { showToast('👁️ View-only access.', 'info'); return; }
+            const acc = accounts.find(a => a.id === bankImportAccId); if (!acc || !bankImportData) return;
+            const rows = buildBankRows().sort((a, b) => (a.date < b.date ? -1 : 1));
+            if (!rows.length) { showToast('Nothing to import — check the column mapping.', 'error'); return; }
+            const dup = (list, r, amt) => (list || []).some(x => x.date === r.date && Math.abs((x.amount || 0) - amt) < 0.005 && (x.note || '') === r.note);
+            const billMatch = r => bills.some(b => (b.payments || []).some(p => p.accountId === acc.id && p.date === r.date && Math.abs((p.amount || 0) - r.debit) < 0.005));
+            acc.deposits = acc.deposits || []; acc.debits = acc.debits || [];
+            let nIn = 0, nOut = 0, skipped = 0, inT = 0, outT = 0;
+            rows.forEach(r => {
+                if (r.credit > 0) { if (dup(acc.deposits, r, r.credit)) { skipped++; return; } acc.deposits.push({ date: r.date, amount: r.credit, note: r.note }); nIn++; inT += r.credit; }
+                else if (r.debit > 0) { if (billMatch(r) || dup(acc.debits, r, r.debit)) { skipped++; return; } acc.debits.push({ date: r.date, amount: r.debit, note: r.note }); nOut++; outT += r.debit; }
+            });
+            let balMsg;
+            if (bankImportData.finalBalance !== null && bankImportData.finalBalance !== undefined) { acc.balance = bankImportData.finalBalance; balMsg = ` Balance set to ${formatCurrency(acc.balance)}.`; }
+            else { acc.balance = Math.round((acc.balance + inT - outT) * 100) / 100; balMsg = ` Balance adjusted to ${formatCurrency(acc.balance)}.`; }
+            saveData(); closeBankImportModal(); renderAll();
+            showToast(`Imported ${nIn} deposit(s) and ${nOut} bank transaction(s)${skipped ? ` · ${skipped} skipped` : ''}.${balMsg}`, nIn + nOut ? 'success' : 'info');
+        }
         function renderDebts() {
             const debtBills = bills.filter(b => b.isPayoff);
             const totalOwed = debtBills.reduce((s, b) => s + b.totalOwed, 0);
@@ -2923,8 +3071,9 @@
         document.getElementById('accountModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeAccountModal();});
         document.getElementById('unpayModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeUnpayModal();});
         document.getElementById('depositModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeDepositModal();});
+        document.getElementById('bankImportModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeBankImportModal();});
         document.getElementById('budgetEditModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeBudgetEditModal();});
-        document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();closePaymentModal();closeBulkPaymentModal();closeAccountModal();closeUnpayModal();closeBudgetEditModal();closeDepositModal();closeImportPreviewModal();closeImportModal();}if(e.key==='n'&&e.ctrlKey){e.preventDefault();openModal();}});
+        document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();closePaymentModal();closeBulkPaymentModal();closeAccountModal();closeUnpayModal();closeBudgetEditModal();closeDepositModal();closeBankImportModal();closeImportPreviewModal();closeImportModal();}if(e.key==='n'&&e.ctrlKey){e.preventDefault();openModal();}});
 
         // ============================================================
         // SERVER-SYNCED STATE (replaces the old localStorage store)

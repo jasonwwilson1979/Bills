@@ -435,3 +435,20 @@ class TemplateScriptTests(TestCase):
         builtins = {'confirm', 'parseFloat', 'parseInt', 'String', 'stopPropagation', 'preventDefault'}
         missing = sorted(h for h in handlers if h not in defined and h not in builtins)
         self.assertEqual(missing, [], f'inline handlers not defined in app.html: {missing}')
+
+
+class AccountTransactionsTests(TestCase):
+    def test_account_deposits_and_debits_pass_through(self):
+        user = User.objects.create_user(username='acct', email='acct@example.com', password='pw123456789')
+        self.client.force_login(user)
+        doc = {'appName': 'B', 'budgets': {}, 'bills': [], 'accounts': [
+            {'id': 1, 'name': 'Checking', 'type': 'checking', 'balance': 1000, 'color': 'blue',
+             'deposits': [{'date': '2026-10-01', 'amount': 500, 'note': 'Paycheck'}],
+             'debits': [{'date': '2026-10-02', 'amount': 20, 'note': 'Coffee shop'}]},
+        ]}
+        r = self.client.put('/api/state/', data=json.dumps(doc), content_type='application/json')
+        self.assertEqual(r.status_code, 200)
+        g = self.client.get('/api/state/')
+        acc = g.json()['data']['accounts'][0]
+        self.assertEqual(acc['deposits'], [{'date': '2026-10-01', 'amount': 500, 'note': 'Paycheck'}])
+        self.assertEqual(acc['debits'], [{'date': '2026-10-02', 'amount': 20, 'note': 'Coffee shop'}])
