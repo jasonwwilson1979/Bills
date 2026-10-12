@@ -1,0 +1,217 @@
+# BillFlow — Django website with Google sign-in
+
+A Django website version of the BillFlow bill tracker — the same dark-themed
+UI, but bills/accounts are now saved **per signed-in user on the server** and
+you log in with your **Google account**.
+
+## Quick start
+
+```powershell
+# 1) Install dependencies (already done if you followed the setup)
+python -m pip install -r requirements.txt
+
+# 2) Create / apply the database (SQLite, created on first run)
+python manage.py migrate
+
+# 3) Add your Google OAuth credentials (see below), then start the server
+$env:GOOGLE_CLIENT_ID = "your-client-id.apps.googleusercontent.com"
+$env:GOOGLE_CLIENT_SECRET = "your-secret"
+python manage.py runserver
+```
+
+Open <http://localhost:8000> — you'll be asked to sign in with Google.
+
+## Setting up Google sign-in (one time, ~5 minutes)
+
+1. Go to <https://console.cloud.google.com> and create (or pick) a project.
+2. **APIs & Services → OAuth consent screen**:
+   - User type: *External*, fill in the app name ("BillFlow") and your email.
+   - Under *Audience / Test users*, add the Google account(s) you'll sign in
+     with (required while the consent screen is in "Testing" mode).
+3. **APIs & Services → Credentials → Create credentials → OAuth client ID**:
+   - Application type: *Web application*
+   - Authorized redirect URI (add exactly this):
+     `http://localhost:8000/accounts/google/login/callback/`
+4. Copy the **Client ID** and **Client secret** into the environment variables
+   shown in step 3 of Quick start (or set them permanently with
+   `[Environment]::SetEnvironmentVariable(...)`).
+
+Until the variables are set, the sign-in page shows a friendly warning instead
+of the Google button — nothing else breaks.
+
+## How it works
+
+| Piece | What it does |
+|---|---|
+| `tracker/models.py` | `UserData` — one JSON document per user holding bills, accounts, app name and budgets |
+| `tracker/views.py` | `home` (serves the SPA, injects the saved state), `api_state` (`GET/PUT /api/state/`), `login_view` (styled sign-in page) |
+| `templates/tracker/app.html` | The original SPA — unmodified UX, but persistence now goes through the API instead of `localStorage` |
+| `templates/account/login.html` | Styled "Continue with Google" sign-in page (django-allauth handles the OAuth flow) |
+| `billflow/settings.py` | django-allauth Google provider config, read from environment variables |
+
+Notes:
+
+- Saving is **debounced** (~400 ms after your last change) and sends the whole
+  state document with your CSRF token — simple and robust for this app's size.
+- Each user's data is private to their account (`@login_required` everywhere,
+  one `UserData` row per user).
+- The color-theme picker is still stored per-browser (it's cosmetic).
+- CSV **import and export work exactly as before** — import is fully
+  client-side (parsing + column mapping + preview), the result is saved to your
+  account like any other change.
+- First sign-in seeds the same sample bills the original app used, so you can
+  explore immediately; "Clear Data" in Settings empties your account.
+
+## Deploying to an Ubuntu server
+
+Run these **from this Windows machine** — the helper uses the built-in
+`ssh` / `scp` / `tar` tools, so no extra software is needed here.
+
+### Option A — standalone (Python venv + gunicorn + nginx)
+
+```powershell
+.\deploy\deploy-to-ubuntu.ps1 -Server root@YOUR_SERVER_IP -Mode standalone -Domain bills.example.com
+```
+
+Installs everything on the server (Python venv, gunicorn as a systemd service,
+nginx reverse proxy) and keeps secrets in `/opt/billflow/.env` and the SQLite
+database in `/opt/billflow/data/` — both survive re-deploys. Re-run the same
+command any time to ship an update. For free HTTPS add `--with-certbot` on the
+server: `sudo bash deploy/ubuntu-server-setup.sh --with-certbot --domain bills.example.com`.
+
+### Option B — Docker
+
+```powershell
+.\deploy\deploy-to-ubuntu.ps1 -Server root@YOUR_SERVER_IP -Mode docker
+```
+
+Installs Docker (if missing) and runs the app via `docker compose` with a
+persistent volume for the database. For automatic HTTPS, set
+`BILLFLOW_DOMAIN=yourdomain` in `/opt/billflow/.env` on the server and run
+`sudo docker compose --profile caddy up -d` (Caddy obtains/renews certificates
+automatically).
+
+### Option C — Portainer (Ubuntu, pull from GitHub, pick your port)
+
+Once the project is on GitHub (`git init`, commit, push — it is not a git
+repo yet), Portainer can deploy it two ways. Both let you **choose the host
+port**, so BillFlow can live alongside your other web apps.
+
+**Variables to set in the stack's *Environment variables* section:**
+
+| Variable | Example | Purpose |
+|---|---|---|
+| `BILLFLOW_PORT` | `80` | host port the app is published on (default `8000`) |
+| `BILLFLOW_CONTAINER_PORT` | `581` | port gunicorn listens on *inside* the container (default `8000`) |
+| `GOOGLE_CLIENT_ID` | `...apps.googleusercontent.com` | Google sign-in |
+| `GOOGLE_CLIENT_SECRET` | `...` | Google sign-in |
+| `DJANGO_ALLOWED_HOSTS` | `bills.example.com` | only needed once served via a domain |
+| `DJANGO_CSRF_TRUSTED_ORIGINS` | `https://bills.example.com` | needed behind a proxy |
+
+Do **not** set `DJANGO_SECRET_KEY` — on first start the app generates a strong
+key and persists it in the data volume. Avoid `$` in any variable value
+(see Troubleshooting below).
+
+**C1. Build on the server straight from your GitHub repo (no registry)**
+
+1. Portainer → **Stacks → Add stack → Repository**:
+   - Repository URL + branch `main` (private repo? store a GitHub token in
+     Portainer → Settings → Git credentials first)
+   - Compose path: `docker-compose.yml`
+2. Add the variables from the table above (at minimum `BILLFLOW_PORT`,
+   `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`).
+3. **Deploy the stack** — Portainer clones the repo and builds the image on
+   the server; the SQLite database lives in the `billflow-data` volume and
+   the app answers on your chosen port.
+   Later updates: stack → *Recreate* → *Re-pull image and redeploy*.
+
+**C2. Pull a pre-built image from GHCR (nothing builds on the server)**
+
+1. Push to GitHub — `.github/workflows/docker-publish.yml` publishes
+   `ghcr.io/<your-user>/<your-repo>:latest` on every push to `main`
+   (image appears under the repo's *Packages*).
+2. Private package? Make it public (Packages → package settings → Visibility)
+   or `docker login ghcr.io` on the server with a GitHub PAT.
+3. Portainer → **Stacks → Add stack → Web editor** — paste
+   `deploy/docker-compose.prebuilt.yml`, replace `OWNER/REPO` in the image
+   line (lowercase), add the variables, deploy.
+   Updates: *Re-pull image and redeploy*.
+
+**Picking the port + making Google sign-in work**
+
+- Direct access (`http://your-server-ip:8090`) is fine for trying it out,
+  but **Google blocks plain-HTTP / raw-IP redirect URIs**, so Google sign-in
+  will not work that way — you need HTTPS on a domain.
+- Since your other web apps already use port 80, the easiest route is to
+  point a subdomain at BillFlow's port. On your existing web server add:
+
+  ```nginx
+  server {
+      listen 80;
+      server_name bills.example.com;
+      location / {
+          proxy_pass http://127.0.0.1:8090;
+          proxy_set_header Host $host;
+          proxy_set_header X-Forwarded-Proto $scheme;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      }
+  }
+  ```
+
+  then `sudo certbot --nginx -d bills.example.com` for the certificate.
+- Finish by setting `DJANGO_ALLOWED_HOSTS=bills.example.com` +
+  `DJANGO_CSRF_TRUSTED_ORIGINS=https://bills.example.com` in the stack, and
+  registering `https://bills.example.com/accounts/google/login/callback/`
+  in Google Cloud Console.
+- No domain yet? A free dynamic-DNS name (e.g. DuckDNS) works fine with
+  certbot.
+
+### Either way, finish with Google OAuth
+
+1. Edit `/opt/billflow/.env` on the server and fill in `GOOGLE_CLIENT_ID` /
+   `GOOGLE_CLIENT_SECRET` (auto-generated file, created on first deploy).
+2. Restart: standalone → `sudo systemctl restart billflow`;
+   docker → `sudo docker compose up -d`.
+3. Register the redirect URI in Google Cloud Console:
+   `https://your-domain/accounts/google/login/callback/`
+
+Prefer doing it manually? Copy the project to the server (git clone / scp),
+then run `sudo bash deploy/ubuntu-server-setup.sh --domain your-domain` or
+`sudo docker compose up -d --build`. Add `-DryRun` to the PowerShell helper to
+preview every command it would run.
+
+## Troubleshooting: "failed to read stack.env: Invalid template"
+
+Docker Compose treats `$` inside environment-variable **values** as the start
+of a variable template (that is how `${VAR}` references work). If a value you
+set in Portainer — e.g. a password-generator secret — contains `$`, the deploy
+fails with `Invalid template: "${...}"`.
+
+Any one of these fixes it:
+
+- **Use a value without `$`** — e.g. run
+  `python -c "import secrets; print(secrets.token_urlsafe(50))"`
+  (base64url: only letters, digits, `_` and `-`), or a long hex string from
+  your password manager.
+- **Or escape every `$` in the value as `$$`.**
+- **`DJANGO_SECRET_KEY` specifically: just delete the variable** — the app
+  auto-generates a strong key and persists it in the data volume (see
+  `billflow/settings.py`).
+
+## Running the tests
+
+```powershell
+python manage.py test tracker
+```
+
+Covers: anonymous redirect to sign-in, the styled login page (with and without
+Google credentials configured), sign-out flow, the app page bootstrap, and the
+state API (auth required, payload validation, save + round-trip).
+
+## Production notes (when you deploy)
+
+- Set `DJANGO_SECRET_KEY` and `DJANGO_DEBUG=False`.
+- Add your real domain to `ALLOWED_HOSTS`, update the Site record (or
+  `python manage.py shell`) and register the matching redirect URI in Google
+  Cloud Console (`https://yourdomain/accounts/google/login/callback/`).
+- Serve behind HTTPS; switch SQLite for PostgreSQL if you expect heavy use.
