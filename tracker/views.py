@@ -115,6 +115,10 @@ def api_state(request):
         else:
             # Key omitted (e.g. an older tab) -> keep whatever is stored
             plans = (existing.data or {}).get('paycheckPlans') if existing else None
+        if 'customCategories' in payload:
+            custom_categories = _validate_custom_categories(payload['customCategories'])
+        else:
+            custom_categories = (existing.data or {}).get('customCategories') if existing else None
     except ValueError as exc:
         return HttpResponseBadRequest(str(exc))
 
@@ -124,6 +128,7 @@ def api_state(request):
         'bills': bills,
         'accounts': accounts,
         'paycheckPlans': plans,
+        'customCategories': custom_categories,
     }
     obj, _created = UserData.objects.get_or_create(user=owner, defaults={'data': doc})
     if obj.data != doc:
@@ -214,6 +219,32 @@ def _validate_paycheck_plans(raw):
     if len(raw) > 50:
         raise ValueError('Too many paycheck plans (max 50)')
     return [_validate_plan_item(item) for item in raw]
+
+
+def _validate_custom_categories(raw):
+    """Validate custom bill categories: {key: {label, icon, color}}."""
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError('customCategories must be an object')
+    if len(raw) > 100:
+        raise ValueError('Too many custom categories (max 100)')
+    clean = {}
+    for key, cfg in raw.items():
+        k = str(key).strip()[:40]
+        if not k:
+            raise ValueError('custom category key must not be empty')
+        if not isinstance(cfg, dict):
+            raise ValueError('each custom category must be an object')
+        label = str(cfg.get('label', '')).strip()[:60]
+        if not label:
+            raise ValueError('custom category label must not be empty')
+        clean[k] = {
+            'label': label,
+            'icon': str(cfg.get('icon', 'fa-tag'))[:40],
+            'color': str(cfg.get('color', 'gray'))[:20],
+        }
+    return clean
 
 
 @login_required

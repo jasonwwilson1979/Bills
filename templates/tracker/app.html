@@ -321,6 +321,13 @@
         .cat-debt { background:rgba(239,68,68,0.15); color:var(--accent-red); }
         .cat-other { background:rgba(100,116,139,0.15); color:var(--text-muted); }
         .cat-food { background:rgba(236,72,153,0.15); color:var(--accent-pink); }
+        .cat-c-blue { background:rgba(59,130,246,0.15); color:var(--accent-blue); }
+        .cat-c-orange { background:rgba(245,158,11,0.15); color:var(--accent-orange); }
+        .cat-c-purple { background:rgba(139,92,246,0.15); color:var(--accent-purple); }
+        .cat-c-green { background:rgba(16,185,129,0.15); color:var(--accent-green); }
+        .cat-c-red { background:rgba(239,68,68,0.15); color:var(--accent-red); }
+        .cat-c-pink { background:rgba(236,72,153,0.15); color:var(--accent-pink); }
+        .cat-c-gray { background:rgba(100,116,139,0.15); color:var(--text-muted); }
 
         .stat-card { animation:fadeInUp 0.5s ease backwards; }
         .stat-card:nth-child(1) { animation-delay:0.05s; } .stat-card:nth-child(2) { animation-delay:0.1s; }
@@ -824,6 +831,18 @@
                         <div class="setting-row"><div class="setting-info"><h4>Currency</h4><p>Set your preferred currency</p></div><select class="form-select" style="width:140px;"><option>USD ($)</option><option>EUR (€)</option><option>GBP (£)</option><option>CAD (C$)</option></select></div>
                         <div class="setting-row"><div class="setting-info"><h4>First Day of Week</h4><p>Choose the start day for calendar view</p></div><select class="form-select" style="width:140px;"><option>Sunday</option><option>Monday</option></select></div>
                     </div>
+                    <div class="settings-section"><h3 class="settings-section-title">Categories</h3>
+                        <div class="setting-row">
+                            <div class="setting-info"><h4>Add a category</h4><p>Custom categories appear everywhere built-in ones do — bill forms, budgets, charts and reports.</p></div>
+                            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                                <input type="text" class="form-input" id="newCatName" placeholder="e.g. Pets" style="width:140px;" maxlength="40">
+                                <select class="form-select" id="newCatColor" style="width:100px;"><option value="blue">Blue</option><option value="orange">Orange</option><option value="purple">Purple</option><option value="green">Green</option><option value="red">Red</option><option value="pink">Pink</option><option value="gray">Gray</option></select>
+                                <select class="form-select" id="newCatIcon" style="width:130px;"><option value="fa-tag">🏷 Tag</option><option value="fa-star">⭐ Star</option><option value="fa-heart">❤ Heart</option><option value="fa-car">🚗 Car</option><option value="fa-paw">🐾 Pets</option><option value="fa-graduation-cap">🎓 School</option><option value="fa-plane">✈ Travel</option><option value="fa-gift">🎁 Gifts</option><option value="fa-briefcase">💼 Work</option><option value="fa-dumbbell">🏋 Gym</option><option value="fa-kit-medical">🩺 Medical</option></select>
+                                <button class="btn btn-primary btn-sm" onclick="addCustomCategory()"><i class="fas fa-plus"></i> Add</button>
+                            </div>
+                        </div>
+                        <div id="customCatList" style="margin-top:8px;"></div>
+                    </div>
                     <div class="settings-section"><h3 class="settings-section-title">Sharing</h3>
                         <div class="setting-row">
                             <div class="setting-info"><h4>Invite someone</h4><p>Give a Google account access to <b>your</b> page. Editors can change everything; viewers get read-only access. Pending invites activate the next time that person signs in.</p></div>
@@ -856,7 +875,7 @@
                     <div class="form-group"><label class="form-label">Due Date</label><input type="date" class="form-input" id="billDueDate"></div>
                 </div>
                 <div class="form-row">
-                    <div class="form-group"><label class="form-label">Category</label><select class="form-select" id="billCategory"><option value="housing">🏠 Housing</option><option value="utilities">⚡ Utilities</option><option value="subscriptions">📺 Subscriptions</option><option value="insurance">🛡️ Insurance</option><option value="debt">💳 Debt / Loan</option><option value="food">🍔 Food & Dining</option><option value="other">📦 Other</option></select></div>
+                    <div class="form-group"><label class="form-label">Category</label><select class="form-select" id="billCategory"></select></div>
                     <div class="form-group"><label class="form-label">Status</label><select class="form-select" id="billStatus"><option value="pending">Pending</option><option value="paid">Paid</option><option value="overdue">Overdue</option></select></div>
                 </div>
                 <div class="form-group"><label class="form-label">Notes (optional)</label><input type="text" class="form-input" id="billNotes" placeholder="Any additional notes..."></div>
@@ -970,23 +989,34 @@
         </div>
     </div>
 
+    <!-- DEPOSIT MODAL -->
+    <div class="modal-overlay" id="depositModal">
+        <div class="modal" style="width:420px;">
+            <div class="modal-header"><h3 class="modal-title"><i class="fas fa-arrow-down" style="color:var(--accent-green);margin-right:8px;"></i>Deposit to <span id="depositAccName"></span></h3><button class="modal-close" onclick="closeDepositModal()"><i class="fas fa-times"></i></button></div>
+            <div class="modal-body">
+                <div class="form-group"><label class="form-label">Amount ($)</label><input type="number" class="form-input" id="depositAmount" placeholder="0.00" step="0.01" min="0"></div>
+                <div class="form-row">
+                    <div class="form-group"><label class="form-label">Date</label><input type="date" class="form-input" id="depositDate"></div>
+                    <div class="form-group"><label class="form-label">Note (optional)</label><input type="text" class="form-input" id="depositNote" placeholder="e.g., Paycheck"></div>
+                </div>
+            </div>
+            <div class="modal-footer"><button class="btn btn-secondary" onclick="closeDepositModal()">Cancel</button><button class="btn btn-pay" onclick="recordDeposit()"><i class="fas fa-check"></i> Add Deposit</button></div>
+        </div>
+    </div>
+
     <!-- ACCOUNT WITHDRAWALS MODAL -->
     <div class="modal-overlay" id="withdrawalsModal">
         <div class="modal" style="width:700px;">
             <div class="modal-header">
-                <h3 class="modal-title"><i class="fas fa-arrow-down" style="color:var(--accent-red);margin-right:8px;"></i><span id="withdrawalsModalTitle">Account Withdrawals</span></h3>
+                <h3 class="modal-title"><i class="fas fa-list-ul" style="color:var(--accent-blue);margin-right:8px;"></i><span id="withdrawalsModalTitle">Account Activity</span></h3>
                 <button class="modal-close" onclick="closeWithdrawalsModal()"><i class="fas fa-times"></i></button>
             </div>
-            <div class="modal-body">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+            <div class="modal-body" style="max-height:65vh;overflow-y:auto;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:8px;">
+                    <div class="filter-tabs" id="withdrawalYearTabs"></div>
                     <div class="filter-tabs">
-                        <button class="filter-tab active" onclick="filterWithdrawalsByPeriod('6months', this)">6 Months</button>
-                        <button class="filter-tab" onclick="filterWithdrawalsByPeriod('year', this)">1 Year</button>
-                        <button class="filter-tab" onclick="filterWithdrawalsByPeriod('all', this)">All Time</button>
-                    </div>
-                    <div class="filter-tabs">
-                        <button class="filter-tab active" onclick="sortWithdrawals('date', this)">By Date</button>
-                        <button class="filter-tab" onclick="sortWithdrawals('amount', this)">By Amount</button>
+                        <button class="filter-tab active" onclick="sortActivity('date', this)">By Date</button>
+                        <button class="filter-tab" onclick="sortActivity('amount', this)">By Amount</button>
                     </div>
                 </div>
                 <div id="withdrawalsSummary" style="margin-bottom:20px;padding:16px;background:var(--bg-card);border-radius:var(--radius-md);border:1px solid var(--border-color);"></div>
@@ -1531,7 +1561,8 @@
 
         function openBudgetEditModal() {
             const budgets=getBudgets();
-            document.getElementById('budgetEditFields').innerHTML=Object.entries(budgets).map(([cat,amt])=>{
+            const allCats={};Object.keys(categoryConfig).forEach(k=>{allCats[k]=budgets[k]||0;});
+            document.getElementById('budgetEditFields').innerHTML=Object.entries(allCats).map(([cat,amt])=>{
                 const cfg=categoryConfig[cat]||categoryConfig.other;
                 return `<div class="budget-edit-row"><div class="budget-edit-color" style="background:${colorMap[cfg.color]}"></div><span class="budget-edit-label">${cfg.label}</span><input type="number" class="budget-edit-input" id="budget-edit-${cat}" value="${amt}" step="1" min="0" oninput="updateBudgetEditTotal()"></div>`;
             }).join('');
@@ -1546,7 +1577,7 @@
         }
         function saveBudgets() {
             const budgets=getBudgets();
-            Object.keys(budgets).forEach(cat=>{const inp=document.getElementById(`budget-edit-${cat}`);budgets[cat]=inp?parseFloat(inp.value)||0:0;});
+            Object.keys(categoryConfig).forEach(cat=>{const inp=document.getElementById(`budget-edit-${cat}`);budgets[cat]=inp?parseFloat(inp.value)||0:0;});
             saveBudgetsToStorage(budgets);closeBudgetEditModal();renderBudget();showToast('Budget allocation updated!','success');
         }
 
@@ -1705,8 +1736,8 @@
         }
 
         let currentWithdrawalAccountId = null;
-        let withdrawalPeriod = '6months';
-        let withdrawalSort = 'date';
+        let activityYear = 'all';
+        let activitySort = 'date';
 
         function getAllAccountWithdrawals(accountId) {
             const withdrawals = [];
@@ -1728,25 +1759,22 @@
             return withdrawals;
         }
 
-        function filterWithdrawalsByPeriod(period, el) {
-            withdrawalPeriod = period;
-            document.querySelectorAll('.filter-tabs .filter-tab').forEach(t => {
-                if (t.textContent.includes('Month') || t.textContent.includes('Year') || t.textContent.includes('Time')) {
-                    t.classList.remove('active');
-                }
-            });
-            if (el) el.classList.add('active');
+        function renderWithdrawalYearTabs() {
+            const el = document.getElementById('withdrawalYearTabs');
+            if (!el || !currentWithdrawalAccountId) return;
+            const years = [...new Set(getAllAccountActivity(currentWithdrawalAccountId).map(r => (r.date || '').slice(0, 4)).filter(Boolean))].sort((a, b) => (a < b ? 1 : -1));
+            let html = `<button class="filter-tab ${activityYear === 'all' ? 'active' : ''}" onclick="filterActivityByYear('all', this)">All time</button>`;
+            years.forEach(y => { html += `<button class="filter-tab ${activityYear === y ? 'active' : ''}" onclick="filterActivityByYear('${y}', this)">${y}</button>`; });
+            el.innerHTML = html;
+        }
+        function filterActivityByYear(year, el) {
+            activityYear = year;
+            if (el) { el.parentElement.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active')); el.classList.add('active'); }
             renderWithdrawalsList();
         }
-
-        function sortWithdrawals(sortBy, el) {
-            withdrawalSort = sortBy;
-            document.querySelectorAll('.filter-tabs .filter-tab').forEach(t => {
-                if (t.textContent.includes('Date') || t.textContent.includes('Amount')) {
-                    t.classList.remove('active');
-                }
-            });
-            if (el) el.classList.add('active');
+        function sortActivity(sortBy, el) {
+            activitySort = sortBy;
+            if (el) { el.parentElement.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active')); el.classList.add('active'); }
             renderWithdrawalsList();
         }
 
@@ -1755,92 +1783,65 @@
             const account = accounts.find(a => a.id === currentWithdrawalAccountId);
             if (!account) return;
 
-            let withdrawals = getAllAccountWithdrawals(account.id);
+            let activity = getAllAccountActivity(account.id);
+            if (activityYear !== 'all') activity = activity.filter(r => (r.date || '').slice(0, 4) === activityYear);
+            if (activitySort === 'date') activity.sort((a, b) => (a.date < b.date ? 1 : -1));
+            else activity.sort((a, b) => b.amount - a.amount);
 
-            // Filter by period
-            const now = new Date();
-            let cutoffDate;
-            if (withdrawalPeriod === '6months') {
-                cutoffDate = new Date(now.getFullYear(), now.getMonth() - 6, 1);
-            } else if (withdrawalPeriod === 'year') {
-                cutoffDate = new Date(now.getFullYear() - 1, now.getMonth(), 1);
-            }
-            // 'all' means no cutoff
-
-            if (cutoffDate) {
-                withdrawals = withdrawals.filter(w => new Date(w.date + 'T00:00:00') >= cutoffDate);
-            }
-
-            // Sort
-            if (withdrawalSort === 'date') {
-                withdrawals.sort((a, b) => new Date(b.date) - new Date(a.date));
-            } else {
-                withdrawals.sort((a, b) => b.amount - a.amount);
-            }
-
-            // Calculate summary
-            const totalWithdrawn = withdrawals.reduce((s, w) => s + w.amount, 0);
-            const currentMonth = now.getMonth();
-            const currentYear = now.getFullYear();
-            const monthToDate = withdrawals.filter(w => {
-                const d = new Date(w.date + 'T00:00:00');
-                return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-            }).reduce((s, w) => s + w.amount, 0);
+            const inflow = activity.filter(r => r.type === 'in').reduce((s, r) => s + r.amount, 0);
+            const outflow = activity.filter(r => r.type === 'out').reduce((s, r) => s + r.amount, 0);
+            const net = inflow - outflow;
 
             document.getElementById('withdrawalsSummary').innerHTML = `
                 <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;">
                     <div style="text-align:center;padding:12px;background:var(--bg-input);border-radius:var(--radius-sm);">
-                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Total Withdrawn</div>
-                        <div style="font-size:18px;font-weight:800;color:var(--accent-red);">${formatCurrency(totalWithdrawn)}</div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Money In</div>
+                        <div style="font-size:18px;font-weight:800;color:var(--accent-green);">+${formatCurrency(inflow)}</div>
                     </div>
                     <div style="text-align:center;padding:12px;background:var(--bg-input);border-radius:var(--radius-sm);">
-                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">This Month</div>
-                        <div style="font-size:18px;font-weight:800;color:var(--accent-red);">${formatCurrency(monthToDate)}</div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Money Out</div>
+                        <div style="font-size:18px;font-weight:800;color:var(--accent-red);">-${formatCurrency(outflow)}</div>
                     </div>
                     <div style="text-align:center;padding:12px;background:var(--bg-input);border-radius:var(--radius-sm);">
-                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Transactions</div>
-                        <div style="font-size:18px;font-weight:800;color:var(--text-primary);">${withdrawals.length}</div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Net</div>
+                        <div style="font-size:18px;font-weight:800;color:${net >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'};">${formatCurrency(net)}</div>
                     </div>
                 </div>
             `;
 
-            // Group by month for list view
+            // Group activity by year for the list view
             const grouped = {};
-            withdrawals.forEach(w => {
-                const d = new Date(w.date + 'T00:00:00');
-                const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-                if (!grouped[key]) grouped[key] = { label: monthNames[d.getMonth()] + ' ' + d.getFullYear(), transactions: [] };
-                grouped[key].transactions.push(w);
-            });
+            activity.forEach(r => { const y = (r.date || '').slice(0, 4) || 'Unknown'; (grouped[y] = grouped[y] || []).push(r); });
 
             let html = '';
-            Object.entries(grouped).sort((a, b) => b[0].localeCompare(a[0])).forEach(([key, group]) => {
-                const monthTotal = group.transactions.reduce((s, t) => s + t.amount, 0);
-                html += `<div style="margin-bottom:20px;"><div style="font-size:13px;font-weight:700;color:var(--text-secondary);margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--border-color);display:flex;justify-content:space-between;align-items:center;"><span>${group.label}</span><span style="color:var(--accent-red);font-weight:700;">-${formatCurrency(monthTotal)}</span></div>`;
-                group.transactions.forEach(w => {
-                    const cat = categoryConfig[w.category] || categoryConfig.other;
+            Object.entries(grouped).sort((a, b) => b[0].localeCompare(a[0])).forEach(([year, list]) => {
+                const yIn = list.filter(r => r.type === 'in').reduce((s, r) => s + r.amount, 0);
+                const yOut = list.filter(r => r.type === 'out').reduce((s, r) => s + r.amount, 0);
+                html += `<div style="margin-bottom:20px;"><div style="font-size:13px;font-weight:700;color:var(--text-secondary);margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--border-color);display:flex;justify-content:space-between;align-items:center;"><span><i class="far fa-calendar" style="margin-right:6px;"></i>${year} · ${list.length} transaction${list.length === 1 ? '' : 's'}</span><span style="color:${yIn - yOut >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'};font-weight:700;">net ${formatCurrency(yIn - yOut)}</span></div>`;
+                list.forEach(r => {
+                    const isIn = r.type === 'in';
+                    const cat = r.category ? (categoryConfig[r.category] || categoryConfig.other) : null;
                     html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:var(--bg-input);border-radius:var(--radius-sm);margin-bottom:6px;">
                         <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0;">
-                            <div style="width:32px;height:32px;border-radius:var(--radius-sm);background:rgba(239,68,68,0.1);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fas fa-arrow-down" style="font-size:11px;color:var(--accent-red);"></i></div>
-                            <div style="min-width:0;"><div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${w.billName}</div><div style="font-size:11px;color:var(--text-muted);">${formatDate(w.date)}${w.note ? ' · ' + w.note : ''}</div></div>
+                            <div style="width:32px;height:32px;border-radius:var(--radius-sm);background:${isIn ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)'};display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fas ${isIn ? 'fa-arrow-down' : 'fa-arrow-up'}" style="font-size:11px;color:${isIn ? 'var(--accent-green)' : 'var(--accent-red)'};"></i></div>
+                            <div style="min-width:0;"><div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${bfEscapeHtml(r.label)}</div><div style="font-size:11px;color:var(--text-muted);">${formatDate(r.date)}${r.note && r.note !== r.label ? ' · ' + bfEscapeHtml(r.note) : ''}${!isIn && cat ? ` · <span class="category-tag ${cat.class}">${cat.label}</span>` : ''}</div></div>
                         </div>
-                        <div style="text-align:right;flex-shrink:0;"><div style="font-size:14px;font-weight:700;color:var(--accent-red);">-${formatCurrency(w.amount)}</div><div style="font-size:10px;color:var(--text-muted);"><span class="category-tag ${cat.class}">${cat.label}</span></div></div>
+                        <div style="text-align:right;flex-shrink:0;"><div style="font-size:14px;font-weight:700;color:${isIn ? 'var(--accent-green)' : 'var(--text-primary)'};">${isIn ? '+' : '-'}${formatCurrency(r.amount)}</div><div style="font-size:10px;color:var(--text-muted);">${isIn ? 'Deposit' : 'Bill payment'}</div></div>
                     </div>`;
                 });
                 html += '</div>';
             });
 
-            document.getElementById('withdrawalsList').innerHTML = html || '<div class="empty-state" style="padding:40px 20px;"><i class="fas fa-check-circle" style="font-size:32px;"></i><h3>No withdrawals found</h3><p>No payments have been made from this account during the selected period.</p></div>';
+            document.getElementById('withdrawalsList').innerHTML = html || '<div class="empty-state" style="padding:40px 20px;"><i class="fas fa-check-circle" style="font-size:32px;"></i><h3>No activity yet</h3><p>Deposits and bill payments on this account will appear here.</p></div>';
         }
 
         function openWithdrawalsModal(accountId) {
             currentWithdrawalAccountId = accountId;
             const account = accounts.find(a => a.id === accountId);
             if (!account) return;
-            document.getElementById('withdrawalsModalTitle').textContent = `${account.name} - Withdrawals`;
-            withdrawalPeriod = '6months';
-            withdrawalSort = 'date';
-            renderWithdrawalsList();
+            document.getElementById('withdrawalsModalTitle').textContent = `${account.name} — Activity`;
+            activityYear = 'all'; activitySort = 'date';
+            renderWithdrawalYearTabs(); renderWithdrawalsList();
             document.getElementById('withdrawalsModal').classList.add('active');
         }
 
@@ -1853,13 +1854,13 @@
             if (!currentWithdrawalAccountId) return;
             const account = accounts.find(a => a.id === currentWithdrawalAccountId);
             if (!account) return;
-            const withdrawals = getAllAccountWithdrawals(account.id);
-            const h = ['Date', 'Bill Name', 'Category', 'Amount', 'Note'];
-            const r = withdrawals.map(w => [w.date, w.billName, w.category, w.amount, w.note || '']);
+            const activity = getAllAccountActivity(account.id);
+            const h = ['Date', 'Type', 'Name', 'Amount', 'Note'];
+            const r = activity.map(w => [w.date, w.type === 'in' ? 'Deposit' : 'Bill payment', w.label, w.amount, w.note || '']);
             const csv = [h, ...r].map(x => x.map(c => `"${c}"`).join(',')).join('\n');
             const blob = new Blob([csv], { type: 'text/csv' }), url = URL.createObjectURL(blob), a = document.createElement('a');
-            a.href = url; a.download = `${account.name.replace(/\s+/g, '_')}_withdrawals_${new Date().toISOString().split('T')[0]}.csv`; a.click(); URL.revokeObjectURL(url);
-            showToast('Withdrawals exported!', 'success');
+            a.href = url; a.download = `${account.name.replace(/\s+/g, '_')}_activity_${new Date().toISOString().split('T')[0]}.csv`; a.click(); URL.revokeObjectURL(url);
+            showToast('Activity exported!', 'success');
         }
 
         function renderAccounts() {
@@ -1876,10 +1877,10 @@
                 }).reduce((s, w) => s + w.amount, 0);
 
                 return `<div class="account-card ${a.color||'blue'}">
-                    <div class="account-header"><div class="account-icon"><i class="fas ${accountIcons[a.type]||'fa-university'}"></i></div><div style="display:flex;gap:8px;"><button class="action-btn edit" onclick="editAccount(${a.id})" title="Edit"><i class="fas fa-pen"></i></button><button class="action-btn delete" onclick="deleteAccount(${a.id})" title="Delete"><i class="fas fa-trash"></i></button></div></div>
+                    <div class="account-header"><div class="account-icon"><i class="fas ${accountIcons[a.type]||'fa-university'}"></i></div><div style="display:flex;gap:8px;"><button class="action-btn" style="background:rgba(16,185,129,0.15);color:var(--accent-green);" onclick="openDepositModal(${a.id})" title="Deposit"><i class="fas fa-arrow-down"></i></button><button class="action-btn edit" onclick="editAccount(${a.id})" title="Edit"><i class="fas fa-pen"></i></button><button class="action-btn delete" onclick="deleteAccount(${a.id})" title="Delete"><i class="fas fa-trash"></i></button></div></div>
                     <div class="account-balance">${formatCurrency(a.balance)}</div><div class="account-name">${a.name}</div><div class="account-type">${a.type}</div>
-                    <div class="account-withdrawals-summary">${withdrawals.length > 0 ? `${withdrawals.length} payment${withdrawals.length > 1 ? 's' : ''} · -${formatCurrency(totalWithdrawn)} total` : 'No withdrawals yet'}</div>
-                    ${withdrawals.length > 0 ? `<div class="account-view-withdrawals" onclick="openWithdrawalsModal(${a.id})"><i class="fas fa-list"></i> View All Withdrawals</div>` : ''}
+                    <div class="account-withdrawals-summary">${withdrawals.length > 0 ? `${withdrawals.length} payment${withdrawals.length > 1 ? 's' : ''} · -${formatCurrency(totalWithdrawn)} total` : 'No payments yet'}${(a.deposits||[]).length ? ` · <span style="color:var(--accent-green);">${(a.deposits||[]).length} deposit${(a.deposits||[]).length > 1 ? 's' : ''}</span>` : ''}</div>
+                    <div class="account-view-withdrawals" onclick="openWithdrawalsModal(${a.id})"><i class="fas fa-list"></i> View all activity by year</div>
                 </div>`;
             }).join('');
         }
@@ -2107,7 +2108,7 @@
             const blob=new Blob([csv],{type:'text/csv'}),url=URL.createObjectURL(blob),a=document.createElement('a');
             a.href=url;a.download=`billflow_${new Date().toISOString().split('T')[0]}.csv`;a.click();URL.revokeObjectURL(url);showToast('Exported!','success');
         }
-        function clearAllData() { if(confirm('Delete ALL data permanently?')){bills=[];accounts=[];selectedBillIds.clear();savingsSelectedIds.clear();if(bfState){bfState.paycheckPlans=[];bfState.activePaycheckPlanId=null;}saveData();renderAll();setAppName('BillFlow');showToast('All data cleared.','info');} }
+        function clearAllData() { if(confirm('Delete ALL data permanently?')){bills=[];accounts=[];selectedBillIds.clear();savingsSelectedIds.clear();if(bfState){bfState.paycheckPlans=[];bfState.activePaycheckPlanId=null;bfState.customCategories={};}saveData();refreshCustomCategories();refreshCategoryOptions();renderCustomCatsList();renderAll();setAppName('BillFlow');showToast('All data cleared.','info');} }
 
         // ============ PAYCHECK PLAN (multiple plans) ============
         function plansGet() {
@@ -2323,7 +2324,100 @@
             showToast(paidOff ? `🎉 ${paidOff} fully paid off! ${formatCurrency(total)} total.` : `${formatCurrency(total)} paid across ${entries.length} bills from ${acc.name}.`, 'success');
         }
         function renderPlan() { planRenderTabs(); planRenderLists(); }
+
+        // ============ CUSTOM CATEGORIES ============
+        function customCats() {
+            ensureState();
+            if (!bfState.customCategories || typeof bfState.customCategories !== 'object') bfState.customCategories = {};
+            return bfState.customCategories;
+        }
+        const BF_BUILTIN_CATS = ['housing', 'utilities', 'subscriptions', 'insurance', 'debt', 'food', 'other'];
+        function refreshCustomCategories() {
+            const cc = customCats();
+            Object.keys(categoryConfig).forEach(k => { if (BF_BUILTIN_CATS.indexOf(k) === -1) delete categoryConfig[k]; });
+            Object.keys(cc).forEach(key => {
+                const cfg = cc[key];
+                categoryConfig[key] = { label: cfg.label, icon: cfg.icon || 'fa-tag', color: cfg.color || 'gray', class: 'cat-c-' + (cfg.color || 'gray') };
+            });
+        }
+        function refreshCategoryOptions() {
+            const sel = document.getElementById('billCategory');
+            if (!sel) return;
+            const cur = sel.value;
+            sel.innerHTML = Object.entries(categoryConfig).map(([key, cfg]) => `<option value="${key}">${bfEscapeHtml(cfg.label)}</option>`).join('');
+            sel.value = (cur && categoryConfig[cur]) ? cur : 'other';
+        }
+        function viewOnlyMode() { return BF_BOOTSTRAP.sharing && BF_BOOTSTRAP.sharing.readOnly; }
+        function renderCustomCatsList() {
+            const el = document.getElementById('customCatList');
+            if (!el) return;
+            const cc = customCats();
+            const counts = {}; bills.forEach(b => { counts[b.category] = (counts[b.category] || 0) + 1; });
+            el.innerHTML = Object.entries(categoryConfig).map(([key, cfg]) => {
+                const isCustom = !!cc[key];
+                const ctrl = isCustom
+                    ? `<button class="btn btn-danger btn-sm" onclick="deleteCustomCategory('${key}')"><i class="fas fa-trash"></i></button>`
+                    : '<span style="font-size:11px;color:var(--text-muted);">built-in</span>';
+                return `<div class="setting-row" style="align-items:center;"><div class="setting-info"><h4 style="font-size:14px;"><span class="budget-color" style="display:inline-block;background:${colorMap[cfg.color]};margin-right:8px;"></span>${bfEscapeHtml(cfg.label)} <span style="color:var(--text-muted);font-weight:400;">· ${counts[key] || 0} bill(s) · <i class="fas ${bfEscapeHtml(cfg.icon)}"></i></span></h4></div>${ctrl}</div>`;
+            }).join('');
+        }
+        function addCustomCategory() {
+            if (viewOnlyMode()) { showToast('👁️ View-only access.', 'info'); return; }
+            const name = document.getElementById('newCatName').value.trim();
+            const color = document.getElementById('newCatColor').value;
+            const icon = document.getElementById('newCatIcon').value;
+            if (!name) { showToast('Enter a category name.', 'error'); return; }
+            const cc = customCats();
+            let key = 'c_' + name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+            if (!key || key === 'c_') key = 'c_' + Date.now();
+            if (key.length > 38) key = key.slice(0, 38);
+            if (categoryConfig[key] || cc[key]) { showToast('That category already exists.', 'error'); return; }
+            cc[key] = { label: name.slice(0, 40), icon: icon, color: color };
+            refreshCustomCategories(); refreshCategoryOptions(); renderCustomCatsList();
+            document.getElementById('newCatName').value = '';
+            saveData(); renderAll();
+            showToast(`Category "${name.slice(0, 40)}" added.`, 'success');
+        }
+        function deleteCustomCategory(key) {
+            if (viewOnlyMode()) { showToast('👁️ View-only access.', 'info'); return; }
+            const cc = customCats();
+            if (!cc[key]) return;
+            const used = bills.filter(b => b.category === key).length;
+            const msg = used ? `"${cc[key].label}" is used by ${used} bill(s) — they will move to "Other". Delete anyway?` : `Delete category "${cc[key].label}"?`;
+            if (!confirm(msg)) return;
+            delete cc[key]; delete categoryConfig[key];
+            bills.forEach(b => { if (b.category === key) b.category = 'other'; });
+            refreshCategoryOptions(); renderCustomCatsList();
+            saveData(); renderAll();
+            showToast('Category removed.', 'info');
+        }
         // DEBTS PAGE
+        // ============ ACCOUNT DEPOSITS ============
+        let depositAccId = null;
+        function openDepositModal(accId) {
+            if (viewOnlyMode()) { showToast('👁️ View-only access.', 'info'); return; }
+            const acc = accounts.find(a => a.id === accId); if (!acc) return;
+            depositAccId = accId;
+            document.getElementById('depositAccName').textContent = acc.name;
+            document.getElementById('depositAmount').value = '';
+            document.getElementById('depositNote').value = '';
+            document.getElementById('depositDate').value = new Date().toISOString().slice(0, 10);
+            document.getElementById('depositModal').classList.add('active');
+        }
+        function closeDepositModal() { document.getElementById('depositModal').classList.remove('active'); depositAccId = null; }
+        function recordDeposit() {
+            const acc = accounts.find(a => a.id === depositAccId);
+            if (!acc) return;
+            const amount = parseFloat(document.getElementById('depositAmount').value);
+            const date = document.getElementById('depositDate').value;
+            const note = document.getElementById('depositNote').value.trim();
+            if (!amount || amount <= 0 || !date) { showToast('Enter a valid amount & date.', 'error'); return; }
+            acc.deposits = acc.deposits || [];
+            acc.deposits.push({ date: date, amount: amount, note: note || 'Deposit' });
+            acc.balance += amount;
+            saveData(); closeDepositModal(); renderAll();
+            showToast(`${formatCurrency(amount)} deposited to ${acc.name}.`, 'success');
+        }
         function renderDebts() {
             const debtBills = bills.filter(b => b.isPayoff);
             const totalOwed = debtBills.reduce((s, b) => s + b.totalOwed, 0);
@@ -2818,8 +2912,9 @@
         document.getElementById('bulkPaymentModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeBulkPaymentModal();});
         document.getElementById('accountModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeAccountModal();});
         document.getElementById('unpayModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeUnpayModal();});
+        document.getElementById('depositModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeDepositModal();});
         document.getElementById('budgetEditModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeBudgetEditModal();});
-        document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();closePaymentModal();closeBulkPaymentModal();closeAccountModal();closeUnpayModal();closeBudgetEditModal();closeImportPreviewModal();closeImportModal();}if(e.key==='n'&&e.ctrlKey){e.preventDefault();openModal();}});
+        document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();closePaymentModal();closeBulkPaymentModal();closeAccountModal();closeUnpayModal();closeBudgetEditModal();closeDepositModal();closeImportPreviewModal();closeImportModal();}if(e.key==='n'&&e.ctrlKey){e.preventDefault();openModal();}});
 
         // ============================================================
         // SERVER-SYNCED STATE (replaces the old localStorage store)
@@ -2831,7 +2926,7 @@
         const BF_DEFAULT_BUDGETS = { housing:1500, utilities:350, subscriptions:100, insurance:200, debt:800, food:300, other:250 };
 
         function ensureState() {
-            if (!bfState) bfState = { appName: 'BillFlow', budgets: { ...BF_DEFAULT_BUDGETS }, paycheckPlans: [] };
+            if (!bfState) bfState = { appName: 'BillFlow', budgets: { ...BF_DEFAULT_BUDGETS }, paycheckPlans: [], customCategories: {} };
         }
 
         function pushStateToServer() {
@@ -2842,7 +2937,7 @@
             fetch('/api/state/', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
-                body: JSON.stringify({ appName: getAppName(), budgets: getBudgets(), bills: bills, accounts: accounts, paycheckPlans: bfState.paycheckPlans || null })
+                body: JSON.stringify({ appName: getAppName(), budgets: getBudgets(), bills: bills, accounts: accounts, paycheckPlans: bfState.paycheckPlans || null, customCategories: bfState.customCategories || null })
             }).then(r => {
                 if (r.status === 403) { showToast('👁️ View-only access — changes are not saved.', 'info'); return; }
                 if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -3045,6 +3140,10 @@
         function normalizeCategory(raw) {
             const s = String(raw || '').trim().toLowerCase();
             if (['housing', 'utilities', 'subscriptions', 'insurance', 'debt', 'food', 'other'].indexOf(s) !== -1) return s;
+            const cc = (bfState && bfState.customCategories) || {};
+            for (const key of Object.keys(cc)) {
+                if (key.toLowerCase() === s || String(cc[key].label || '').trim().toLowerCase() === s) return key;
+            }
             if (/rent|mortgage|home|housing|landlord/.test(s)) return 'housing';
             if (/electric|water|gas|internet|utilit|power|cable|phone|cell|trash|sewer/.test(s)) return 'utilities';
             if (/netflix|spotify|hulu|disney|subscription|streaming|prime/.test(s)) return 'subscriptions';
@@ -3261,6 +3360,7 @@
         updateThemeUI(savedTheme);
 
         loadData();
+        refreshCustomCategories(); refreshCategoryOptions(); renderCustomCatsList();
         const savedName = getAppName();
         setAppName(savedName);
         document.getElementById('appNameInput').value = savedName === 'BillFlow' ? '' : savedName;

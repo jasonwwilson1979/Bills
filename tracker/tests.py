@@ -373,3 +373,44 @@ class PaycheckPlanTests(TestCase):
         self._put({'appName': 'B', 'budgets': {}, 'bills': [], 'accounts': [], 'paycheckPlans': None})
         g = self.client.get('/api/state/')
         self.assertIsNone(g.json()['data']['paycheckPlans'])
+
+
+class CustomCategoryTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='cats', email='cats@example.com', password='pw123456789')
+        self.client.force_login(self.user)
+
+    def _put(self, doc):
+        return self.client.put('/api/state/', data=json.dumps(doc), content_type='application/json')
+
+    def test_custom_categories_roundtrip(self):
+        doc = {'appName': 'B', 'budgets': {}, 'bills': [], 'accounts': [],
+               'customCategories': {'c_pets': {'label': 'Pets', 'icon': 'fa-paw', 'color': 'pink'}}}
+        r = self._put(doc)
+        self.assertEqual(r.status_code, 200)
+        g = self.client.get('/api/state/')
+        cc = g.json()['data']['customCategories']
+        self.assertEqual(cc['c_pets'], {'label': 'Pets', 'icon': 'fa-paw', 'color': 'pink'})
+
+    def test_custom_categories_validation_rejects_bad_payloads(self):
+        base = {'appName': 'B', 'budgets': {}, 'bills': [], 'accounts': []}
+        for bad in ('nope', [{'label': 'x'}], {'c_x': {'label': ''}}, {'c_x': 'Pets'}):
+            doc = dict(base, customCategories=bad)
+            self.assertEqual(self._put(doc).status_code, 400, msg=f'payload {bad!r} should be rejected')
+
+    def test_custom_categories_preserved_when_omitted(self):
+        doc = {'appName': 'B', 'budgets': {}, 'bills': [], 'accounts': [],
+               'customCategories': {'c_pets': {'label': 'Pets', 'icon': 'fa-paw', 'color': 'pink'}}}
+        self._put(doc)
+        r = self._put({'appName': 'B2', 'budgets': {}, 'bills': [], 'accounts': []})
+        self.assertEqual(r.status_code, 200)
+        g = self.client.get('/api/state/')
+        self.assertEqual(g.json()['data']['customCategories']['c_pets']['label'], 'Pets')
+
+    def test_custom_categories_can_be_cleared(self):
+        doc = {'appName': 'B', 'budgets': {}, 'bills': [], 'accounts': [],
+               'customCategories': {'c_pets': {'label': 'Pets', 'icon': 'fa-paw', 'color': 'pink'}}}
+        self._put(doc)
+        self._put({'appName': 'B', 'budgets': {}, 'bills': [], 'accounts': [], 'customCategories': None})
+        g = self.client.get('/api/state/')
+        self.assertIsNone(g.json()['data']['customCategories'])
