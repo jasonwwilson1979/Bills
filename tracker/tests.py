@@ -87,6 +87,7 @@ class AppPageTests(TestCase):
         self.assertIn('BF_BOOTSTRAP', body)
         self.assertIn('state: null', body)   # no saved document yet
         self.assertIn('Jason', body)         # sidebar shows the display name
+        self.assertIn('Welcome back, Jason', body)  # personalized dashboard subtitle
         self.assertIn('Sign out', body)
 
     def test_app_page_shows_backup_and_restore_ui(self):
@@ -502,6 +503,30 @@ class TemplateScriptTests(TestCase):
         builtins = {'confirm', 'parseFloat', 'parseInt', 'String', 'stopPropagation', 'preventDefault'}
         missing = sorted(h for h in handlers if h not in defined and h not in builtins)
         self.assertEqual(missing, [], f'inline handlers not defined in app.html: {missing}')
+
+    def test_mobile_menu_available_on_every_page(self):
+        """Every page header must include the mobile hamburger, and the CSS
+        hide rule must precede the 768px media query so the mobile
+        'display:flex' override wins the cascade (otherwise phones can only
+        ever see the dashboard)."""
+        import re
+
+        from django.conf import settings
+
+        path = os.path.join(str(settings.BASE_DIR), 'templates', 'tracker', 'app.html')
+        with open(path, encoding='utf-8') as fh:
+            html = fh.read()
+        sections = len(re.findall(r'class="page-section(?: active)?" id="page-', html))
+        burgers = len(re.findall(r'class="btn btn-secondary mobile-menu-btn"', html))
+        self.assertEqual(sections, 12, 'unexpected page-section count')
+        self.assertGreaterEqual(burgers, sections,
+                                'some page headers are missing the mobile menu button')
+        idx_none = html.find('.mobile-menu-btn { display:none !important; }')
+        idx_media = html.find('@media (max-width:768px)')
+        self.assertNotEqual(idx_none, -1, 'mobile-menu hide rule missing')
+        self.assertNotEqual(idx_media, -1, 'mobile media query missing')
+        self.assertLess(idx_none, idx_media,
+                        'hide rule must come before the media query it overrides')
 
 
 class AccountTransactionsTests(TestCase):

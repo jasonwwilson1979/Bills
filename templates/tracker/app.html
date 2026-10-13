@@ -453,8 +453,14 @@
         .budget-edit-total .value { font-size:18px; font-weight:800; color:var(--accent-blue); }
 
         @media (max-width:1200px) { .stats-grid{grid-template-columns:repeat(2,1fr);} .content-grid{grid-template-columns:1fr;} .savings-layout{grid-template-columns:1fr;} .savings-summary-card{position:static;} }
+        /* Hidden on desktop; the 768px media query below re-shows it (this
+           rule must come first so the mobile override wins the cascade). */
+        .mobile-menu-btn { display:none !important; }
+        .sidebar-backdrop { display:none; cursor:pointer; }
         @media (max-width:768px) {
             .sidebar{transform:translateX(-100%);} .sidebar.open{transform:translateX(0);}
+            .sidebar-backdrop { position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(2,6,23,0.55); z-index:99; }
+            #sidebar.open ~ .sidebar-backdrop { display:block; }
             .main-content{margin-left:0;max-width:100vw;padding:20px;}
             .stats-grid{grid-template-columns:1fr;}
             .bill-row{grid-template-columns:36px auto 1fr 100px;}
@@ -466,8 +472,6 @@
             .month-navigator { flex-wrap:wrap; justify-content:center; }
             .page-header { flex-direction:column; align-items:flex-start; gap:16px; }
         }
-        .mobile-menu-btn { display:none !important; }
-
         /* CSV import: file banner info block */
         .import-file-info { flex:1; min-width:0; }
         .import-file-name { font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -524,6 +528,7 @@
                 </form>
             </div>
         </aside>
+        <div class="sidebar-backdrop" onclick="toggleSidebar()"></div>
 
         <main class="main-content">
             {% if sharing.viewing_shared %}
@@ -539,7 +544,7 @@
             <!-- DASHBOARD -->
             <div class="page-section active" id="page-dashboard">
                 <div class="page-header">
-                    <div><h1 class="page-title">Dashboard</h1><p class="page-subtitle">Welcome back, John. Here's your bill overview.</p></div>
+                    <div><h1 class="page-title">Dashboard</h1><p class="page-subtitle">Welcome back, {{ display_name }}. Here's your bill overview.</p></div>
                     <div class="header-actions">
                         <button class="btn btn-secondary mobile-menu-btn" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button>
                         <button class="btn btn-secondary" onclick="openImportModal()"><i class="fas fa-file-import"></i> Import</button>
@@ -574,6 +579,7 @@
                         <p class="page-subtitle">Browse bills by month — past, present, and future.</p>
                     </div>
                     <div class="header-actions" style="flex-wrap:wrap;">
+                        <button class="btn btn-secondary mobile-menu-btn" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button>
                         <div class="month-navigator">
                             <button class="month-nav-btn" onclick="navigateBillsMonth(-1)" title="Previous Month"><i class="fas fa-chevron-left"></i></button>
                             <div class="month-nav-selects">
@@ -602,7 +608,7 @@
             <div class="page-section" id="page-accounts">
                 <div class="page-header">
                     <div><h1 class="page-title">Bank Accounts</h1><p class="page-subtitle">Manage your accounts and track balances.</p></div>
-                    <div class="header-actions"><button class="btn btn-primary" onclick="openAccountModal()"><i class="fas fa-plus"></i> Add Account</button></div>
+                    <div class="header-actions"><button class="btn btn-secondary mobile-menu-btn" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button><button class="btn btn-primary" onclick="openAccountModal()"><i class="fas fa-plus"></i> Add Account</button></div>
                 </div>
                 <div class="accounts-grid" id="accountsGrid"></div>
             </div>
@@ -611,7 +617,7 @@
             <div class="page-section" id="page-savings">
                 <div class="page-header">
                     <div><h1 class="page-title">💡 Savings Calculator</h1><p class="page-subtitle">See how much you'd save by eliminating bills.</p></div>
-                    <div class="header-actions"><button class="btn btn-secondary" onclick="resetSavingsCalc()"><i class="fas fa-redo"></i> Reset</button></div>
+                    <div class="header-actions"><button class="btn btn-secondary mobile-menu-btn" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button><button class="btn btn-secondary" onclick="resetSavingsCalc()"><i class="fas fa-redo"></i> Reset</button></div>
                 </div>
                 <div class="savings-layout">
                     <div>
@@ -632,6 +638,7 @@
                 <div class="page-header">
                     <div><h1 class="page-title">Calendar</h1><p class="page-subtitle">See when your bills are due at a glance.</p></div>
                     <div class="header-actions">
+                        <button class="btn btn-secondary mobile-menu-btn" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button>
                         <div class="calendar-nav"><button class="btn btn-secondary btn-sm" onclick="changeMonth(-1)"><i class="fas fa-chevron-left"></i></button><span class="calendar-nav-title" id="calendarTitle">January 2025</span><button class="btn btn-secondary btn-sm" onclick="changeMonth(1)"><i class="fas fa-chevron-right"></i></button></div>
                         <button class="btn btn-primary" onclick="openModal()"><i class="fas fa-plus"></i> Add Bill</button>
                     </div>
@@ -643,7 +650,7 @@
             <div class="page-section" id="page-budget">
                 <div class="page-header">
                     <div><h1 class="page-title">Budget Planner</h1><p class="page-subtitle">Set and track your spending budgets by category.</p></div>
-                    <div class="header-actions"><button class="btn btn-primary" onclick="openBudgetEditModal()"><i class="fas fa-edit"></i> Edit Budgets</button></div>
+                    <div class="header-actions"><button class="btn btn-secondary mobile-menu-btn" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button><button class="btn btn-primary" onclick="openBudgetEditModal()"><i class="fas fa-edit"></i> Edit Budgets</button></div>
                 </div>
                 <div class="content-grid">
                     <div class="card"><div class="card-header"><h3 class="card-title">Budget Allocation</h3></div><div class="card-body" id="budgetList"></div></div>
@@ -653,7 +660,7 @@
 
             <!-- FORECAST -->
             <div class="page-section" id="page-forecast">
-                <div class="page-header"><div><h1 class="page-title">Bill Forecast</h1><p class="page-subtitle">Plan ahead with projected bill payments.</p></div></div>
+                <div class="page-header"><div><h1 class="page-title">Bill Forecast</h1><p class="page-subtitle">Plan ahead with projected bill payments.</p></div><div class="header-actions"><button class="btn btn-secondary mobile-menu-btn" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button></div></div>
                 <div class="stats-grid" style="grid-template-columns:repeat(3,1fr);">
                     <div class="stat-card blue"><div class="stat-header"><div class="stat-icon"><i class="fas fa-calendar"></i></div></div><div class="stat-value" id="nextMonthTotal">$0</div><div class="stat-label">Next Month's Projected Bills</div></div>
                     <div class="stat-card purple"><div class="stat-header"><div class="stat-icon"><i class="fas fa-chart-line"></i></div></div><div class="stat-value" id="threeMonthAvg">$0</div><div class="stat-label">3-Month Average</div></div>
@@ -664,7 +671,7 @@
 
             <!-- PAYCHECK PLAN -->
             <div class="page-section" id="page-plan">
-                <div class="page-header"><div><h1 class="page-title">💵 Paycheck Plan</h1><p class="page-subtitle">Decide which bills this paycheck covers — and what waits for the next one.</p></div></div>
+                <div class="page-header"><div><h1 class="page-title">💵 Paycheck Plan</h1><p class="page-subtitle">Decide which bills this paycheck covers — and what waits for the next one.</p></div><div class="header-actions"><button class="btn btn-secondary mobile-menu-btn" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button></div></div>
                 <div class="card"><div class="card-body">
                     <div id="planTabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;"></div>
                     <div class="settings-section"><h3 class="settings-section-title">This paycheck</h3>
@@ -703,7 +710,7 @@
             <div class="page-section" id="page-debts">
                 <div class="page-header">
                     <div><h1 class="page-title">Debts Tracker</h1><p class="page-subtitle">Track and manage your debt payoff progress.</p></div>
-                    <div class="header-actions"><button class="btn btn-primary" onclick="openModal()"><i class="fas fa-plus"></i> Add Debt</button></div>
+                    <div class="header-actions"><button class="btn btn-secondary mobile-menu-btn" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button><button class="btn btn-primary" onclick="openModal()"><i class="fas fa-plus"></i> Add Debt</button></div>
                 </div>
                 <div class="stats-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:32px;">
                     <div class="stat-card red"><div class="stat-header"><div class="stat-icon"><i class="fas fa-hand-holding-usd"></i></div></div><div class="stat-value" id="totalDebtOwed">$0</div><div class="stat-label">Total Debt Owed</div></div>
@@ -729,6 +736,7 @@
                 <div class="page-header">
                     <div><h1 class="page-title">Reports</h1><p class="page-subtitle">Visualize your spending patterns and financial trends.</p></div>
                     <div class="header-actions">
+                        <button class="btn btn-secondary mobile-menu-btn" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button>
                         <div class="filter-tabs">
                             <button class="filter-tab active" onclick="switchReportView('overview', this)">Overview</button>
                             <button class="filter-tab" onclick="switchReportView('category', this)">By Category</button>
@@ -776,7 +784,7 @@
 
             <!-- SETTINGS -->
             <div class="page-section" id="page-settings">
-                <div class="page-header"><div><h1 class="page-title">Settings</h1><p class="page-subtitle">Customize your experience.</p></div></div>
+                <div class="page-header"><div><h1 class="page-title">Settings</h1><p class="page-subtitle">Customize your experience.</p></div><div class="header-actions"><button class="btn btn-secondary mobile-menu-btn" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button></div></div>
                 <div class="card"><div class="card-body">
                     <div class="settings-section"><h3 class="settings-section-title">App Customization</h3>
                         <div class="setting-row">
@@ -876,6 +884,7 @@
             <div class="page-section" id="page-chat">
                 <div class="page-header">
                     <div><h1 class="page-title">Chat</h1><p class="page-subtitle" id="chatSubtitle">Talk with everyone who shares this page.</p></div>
+                    <div class="header-actions"><button class="btn btn-secondary mobile-menu-btn" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button></div>
                 </div>
                 <div class="card">
                     <div class="card-body" style="padding:0;">
