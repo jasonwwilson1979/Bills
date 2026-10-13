@@ -892,7 +892,6 @@
                         <div class="setting-row">
                             <div class="setting-info"><h4>Background Darkness</h4><p>Adjust the overall darkness of the background</p></div>
                                 <input type="range" id="darknessSlider" min="0" max="100" value="0" style="width:150px;accent-color:var(--accent-blue);" oninput="updateDarkness(this.value)">
-                            </div>
                         </div>
                         <div class="setting-row">
                             <div class="setting-info"><h4>Reset Theme</h4><p>Restore default theme colors</p></div>
@@ -1324,8 +1323,6 @@
         </div>
     </div>
 
-    </div>
-
     <!-- BULK PAY BAR -->
     <div class="bulk-pay-bar" id="bulkPayBar">
         <div class="bulk-pay-info"><div class="bulk-pay-count" id="bulkPayCount">0</div><span class="bulk-pay-text">bills selected</span></div>
@@ -1459,7 +1456,9 @@
 
         /* ===== CHAT ===== */
         #page-chat .card { max-width: 860px; margin: 0 auto; }
-        .chat-messages { height: 520px; overflow-y: auto; overflow-x: hidden; padding: 20px 24px; display: flex; flex-direction: column; gap: 10px; }
+        #page-chat .page-header { max-width: 860px; margin-left: auto; margin-right: auto; }
+        #page-chat .page-subtitle { overflow-wrap: anywhere; }
+        .chat-messages { height: 520px; max-height: calc(100vh - 280px); overflow-y: auto; overflow-x: hidden; padding: 20px 24px; display: flex; flex-direction: column; gap: 10px; }
         .chat-empty { text-align: center; color: var(--text-muted); font-size: 13px; margin: auto; padding: 40px 0; }
         .chat-row { display: flex; flex-direction: column; max-width: 75%; min-width: 0; }
         .chat-row.mine { align-self: flex-end; align-items: flex-end; }
@@ -2283,7 +2282,7 @@
         }
 
         // NAVIGATION
-        function switchPage(p) { document.querySelectorAll('.page-section').forEach(s=>s.classList.remove('active')); document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active')); document.getElementById(`page-${p}`).classList.add('active'); document.querySelector(`.nav-item[data-page="${p}"]`).classList.add('active'); window.scrollTo(0, 0); document.getElementById('sidebar').classList.remove('open'); chatSwitchHook(p); }
+        function switchPage(p) { document.querySelectorAll('.page-section').forEach(s=>s.classList.remove('active')); document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active')); document.getElementById(`page-${p}`).classList.add('active'); document.querySelector(`.nav-item[data-page="${p}"]`).classList.add('active'); document.getElementById('sidebar').classList.remove('open'); chatSwitchHook(p); window.scrollTo(0, 0); }
         function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); }
         function filterBills(f,el) { currentFilter=f; if(el){el.closest('.filter-tabs').querySelectorAll('.filter-tab').forEach(t=>t.classList.remove('active'));el.classList.add('active');} renderDashboardBills(); }
         function filterAllBills(f,el) { currentFilter=f; if(el){el.closest('.filter-tabs').querySelectorAll('.filter-tab').forEach(t=>t.classList.remove('active'));el.classList.add('active');} renderAllBills(); }
@@ -2687,6 +2686,7 @@
             clearInterval(chatTimer);
             chatTimer = setInterval(chatPoll, 4000);
             chatLoadList().then(() => {
+                window.scrollTo(0, 0);   // async loads must not leave the page scrolled
                 const team = chatConversations.find(c => c.kind === 'page');
                 if (!chatConversations.some(c => c.id === chatActiveId)) {
                     chatActiveId = team ? team.id : (chatConversations[0] ? chatConversations[0].id : null);
@@ -2760,7 +2760,7 @@
             const sub = document.getElementById('chatSubtitle');
             if (!sub) return;
             if (active && active.kind === 'direct') {
-                sub.textContent = '1-on-1 with ' + (active.name || 'this person') + ' — only the two of you can see it.';
+                sub.textContent = 'Private chat with ' + (active.name || 'this person') + ' — just the two of you.';
             } else if (active) {
                 const me = (BF_BOOTSTRAP.email || '').toLowerCase();
                 const others = chatMembers.filter(m => (m.email || '').toLowerCase() !== me)

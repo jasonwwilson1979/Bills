@@ -604,6 +604,61 @@ class TemplateScriptTests(TestCase):
             self.assertIn(needle, html)
 
 
+class TemplateStructureTests(TestCase):
+    """Parses the *rendered* app page with html.parser (script bodies are
+    CDATA, so JS template literals cannot pollute the walk) and asserts the
+    document tree is sound: every page-section is a direct child of <main>
+    and no div is left open. Catches misplaced sections that would push
+    content to the bottom of the page or under the sidebar."""
+
+    def _rendered(self):
+        from django.template.loader import get_template
+        from types import SimpleNamespace
+        return get_template('tracker/app.html').render({
+            'state_json': 'null',
+            'sharing_json': '{}',
+            'sharing': {'viewing_shared': False, 'owner_name': '', 'role': 'owner',
+                        'readOnly': False, 'owner_id': 1,
+                        'my_pages': [{'id': 'mine', 'name': 'My BillFlow', 'active': True}]},
+            'display_name': 'Test', 'user_initial': 'T', 'google_ready': False,
+            'user': SimpleNamespace(email='', is_authenticated=True),
+        })
+
+    def test_page_sections_are_siblings_and_tree_is_balanced(self):
+        from html.parser import HTMLParser
+
+        html = self._rendered()
+        sections, stack, extra = [], [], []
+
+        class Walk(HTMLParser):
+            def handle_starttag(self, tag, attrs):
+                if tag != 'div':
+                    return
+                d = dict(attrs)
+                stack.append(d.get('id') or ('.' + (d.get('class') or '').split()[0]
+                                             if d.get('class') else '<div>'))
+                if 'page-section' in (d.get('class') or ''):
+                    sections.append((d.get('id'), list(stack[:-1])))
+
+            def handle_endtag(self, tag):
+                if tag == 'div':
+                    (stack.pop() if stack else extra.append('near %s' % str(self.getpos())))
+
+        w = Walk(convert_charrefs=True)
+        w.feed(html)
+        w.close()
+        self.assertEqual(extra, [], 'more </div> than <div> somewhere')
+        self.assertEqual(stack, [], 'unclosed <div> elements remain: %r' % stack)
+        ids = [s for s, _ in sections]
+        self.assertEqual(len(ids), len(set(ids)), 'duplicate page-section ids')
+        self.assertIn('page-chat', ids)
+        for sid, ancestors in sections:
+            self.assertEqual(ancestors, ['.app-container'],
+                             'page-section %s has unexpected ancestors %r — every '
+                             'section must sit directly inside .app-container > <main>'
+                             % (sid, ancestors))
+
+
 class AccountTransactionsTests(TestCase):
     def test_account_deposits_and_debits_pass_through(self):
         user = User.objects.create_user(username='acct', email='acct@example.com', password='pw123456789')

@@ -7,6 +7,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.validators import validate_email
 from django.http import HttpResponseBadRequest, HttpResponseNotFound, JsonResponse
 from django.shortcuts import redirect, render
+from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods
 
@@ -25,9 +26,13 @@ def _google_ready():
 
 
 @login_required
+@never_cache
 @ensure_csrf_cookie
 def home(request):
-    """The BillFlow single-page app (requires a signed-in account)."""
+    """The BillFlow single-page app (requires a signed-in account).
+
+    never_cache: the whole app (HTML with inline CSS/JS) is one document —
+    a stale cached copy would show old features and old layout bugs."""
     owner, role = _resolve_active_page(request)
     ud = UserData.objects.filter(user=owner).first()
     state = ud.data if ud else None
