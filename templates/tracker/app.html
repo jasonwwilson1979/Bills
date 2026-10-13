@@ -890,9 +890,10 @@
                 </div>
                 <div class="card">
                     <div class="card-body" style="padding:0;">
+                        <div id="chatTabs" class="chat-tabs"></div>
                         <div id="chatMessages" class="chat-messages"><div class="chat-empty">Loading conversation…</div></div>
                         <div class="chat-input-bar">
-                            <input type="text" id="chatInput" class="form-input chat-input" maxlength="2000" placeholder="Type a message…" onkeydown="chatInputKey(event)">
+                            <textarea id="chatInput" class="form-input chat-input" rows="1" maxlength="2000" placeholder="Type a message… (Enter to send)" onkeydown="chatInputKey(event)" oninput="autosizeChatInput()"></textarea>
                             <button class="btn btn-primary" id="chatSendBtn" onclick="sendChatMessage()"><i class="fas fa-paper-plane"></i> Send</button>
                         </div>
                         <div id="chatViewOnlyNote" class="chat-view-only" style="display:none;"><i class="fas fa-eye"></i> View-only access — you can read this conversation but not send messages.</div>
@@ -1217,6 +1218,18 @@
         </div>
     </div>
 
+    <!-- NEW CHAT (PEOPLE PICKER) MODAL -->
+    <div class="modal-overlay" id="chatPeopleModal">
+        <div class="modal" style="width:440px;">
+            <div class="modal-header"><h3 class="modal-title"><i class="fas fa-user-plus" style="color:var(--accent-blue);margin-right:8px;"></i>Start a 1-on-1 chat</h3><button class="modal-close" onclick="closeChatPeopleModal()"><i class="fas fa-times"></i></button></div>
+            <div class="modal-body">
+                <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">Pick someone who shares this page. 1-on-1 messages stay between the two of you.</p>
+                <div id="chatPeopleList"></div>
+            </div>
+            <div class="modal-footer"><button class="btn btn-secondary" onclick="closeChatPeopleModal()">Close</button></div>
+        </div>
+    </div>
+
     </div>
 
     <!-- BULK PAY BAR -->
@@ -1364,7 +1377,12 @@
         .chat-del { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0 2px; font-size: 10px; line-height: 1; }
         .chat-del:hover { color: var(--accent-red); }
         .chat-input-bar { display: flex; gap: 10px; padding: 16px 20px; border-top: 1px solid var(--border-color); }
-        .chat-input { flex: 1; }
+        .chat-tabs { display: flex; gap: 8px; padding: 14px 20px 0; flex-wrap: wrap; align-items: center; }
+        .chat-tab { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 10px; border: 1px solid var(--border-color); background: var(--bg-secondary); font-size: 13px; font-weight: 600; color: var(--text-secondary); cursor: pointer; transition: var(--transition); font-family: inherit; }
+        .chat-tab:hover { border-color: var(--accent-blue); color: var(--text-primary); }
+        .chat-tab.active { border-color: var(--accent-blue); color: var(--accent-blue); background: rgba(59, 130, 246, 0.10); }
+        .chat-tab-unread { background: var(--accent-red); color: #ffffff; font-size: 10.5px; font-weight: 700; min-width: 18px; height: 18px; border-radius: 9px; display: inline-flex; align-items: center; justify-content: center; padding: 0 5px; }
+        .chat-input { flex: 1; resize: none; min-height: 46px; max-height: 120px; overflow-y: auto; }
         .chat-view-only { padding: 10px 20px 14px; font-size: 12.5px; color: var(--text-muted); text-align: center; }
         @media (max-width: 768px) { .chat-messages { height: 62vh; } .chat-row { max-width: 85%; } }
     </style>
@@ -2488,15 +2506,14 @@
         }
 
         // ============ CHAT (shared-page conversations) ============
-        let chatLastId = 0;         // newest message id rendered for the active page
-        let chatCanPost = true;
-        let chatTimer = null;       // 4s poll while the chat page is open
+        let chatConversations = [];  // conversation list from the server
+        let chatMembers = [];        // people with access to this page
+        let chatActiveId = null;     // active conversation id
+        let chatLastId = 0;          // newest message id rendered for the active conversation
+        let chatTimer = null;        // 4s poll while the chat page is open
         let chatSending = false;
 
-        function chatOwnerId() { return (BF_BOOTSTRAP.sharing && BF_BOOTSTRAP.sharing.owner_id) || 'x'; }
-        function chatSeenKey() { return 'bf_chat_seen_' + chatOwnerId(); }
-        function chatSeenId() { const v = parseInt(localStorage.getItem(chatSeenKey()), 10); return isNaN(v) ? 0 : v; }
-        function markChatSeen() { try { localStorage.setItem(chatSeenKey(), String(chatLastId)); } catch (e) {} updateChatBadge(0); }
+        function chatCanPostNow() { return !viewOnlyMode(); }
 
         function updateChatBadge(n) {
             const el = document.getElementById('chatBadge');
@@ -2508,7 +2525,7 @@
         function chatIsOpen() { const el = document.getElementById('page-chat'); return el && el.classList.contains('active'); }
         function chatSwitchHook(p) {
             if (p === 'chat') openChat();
-            else if (chatTimer) { clearInterval(chatTimer); chatTimer = null; markChatSeen(); }
+            else if (chatTimer) { clearInterval(chatTimer); chatTimer = null; chatPollBadge(); }
         }
 
         function chatFetch(method, body, qs) {
@@ -2523,58 +2540,130 @@
             }));
         }
 
+        function chatTotalUnread() { return chatConversations.reduce((s, c) => s + (c.unread || 0), 0); }
+
+        // Read-only is known immediately from the page bootstrap, so the
+        // input is never left in a broken state by a failed request — worst
+        // case a send shows an error toast.
+        function setChatInputState() {
+            const readOnly = !chatCanPostNow();
+            const input = document.getElementById('chatInput');
+            const btn = document.getElementById('chatSendBtn');
+            const note = document.getElementById('chatViewOnlyNote');
+            input.disabled = readOnly;
+            btn.disabled = readOnly;
+            note.style.display = readOnly ? 'block' : 'none';
+            input.placeholder = readOnly ? 'Read-only — viewers cannot post' : 'Type a message… (Enter to send)';
+        }
+
+        function autosizeChatInput() {
+            const t = document.getElementById('chatInput');
+            t.style.height = 'auto';
+            t.style.height = Math.min(t.scrollHeight, 120) + 'px';
+        }
+
         function openChat() {
+            chatActiveId = null;
             chatLastId = 0;
-            chatCanPost = true;
+            setChatInputState();
             document.getElementById('chatMessages').innerHTML = '<div class="chat-empty">Loading conversation…</div>';
-            chatFetch().then(({ ok, data }) => {
-                if (!ok) throw new Error('load failed');
-                chatCanPost = !!data.can_post;
-                renderChatMembers(data.members || []);
-                document.getElementById('chatViewOnlyNote').style.display = chatCanPost ? 'none' : 'block';
-                document.getElementById('chatInput').disabled = !chatCanPost;
-                document.getElementById('chatSendBtn').disabled = !chatCanPost;
-                document.getElementById('chatInput').placeholder = chatCanPost ? 'Type a message…' : 'Read-only — viewers cannot post';
-                chatApplyMessages(data.messages || [], true);
-                markChatSeen();
-            }).catch(() => {
-                document.getElementById('chatMessages').innerHTML = '<div class="chat-empty">Could not load the conversation.</div>';
-            });
             clearInterval(chatTimer);
             chatTimer = setInterval(chatPoll, 4000);
+            chatLoadList().then(() => {
+                const team = chatConversations.find(c => c.kind === 'page');
+                if (!chatConversations.some(c => c.id === chatActiveId)) {
+                    chatActiveId = team ? team.id : (chatConversations[0] ? chatConversations[0].id : null);
+                }
+                renderChatTabs();
+                if (chatActiveId) chatLoadMessages(true);
+                else document.getElementById('chatMessages').innerHTML = '<div class="chat-empty">No conversations yet.</div>';
+            }).catch(() => {
+                document.getElementById('chatMessages').innerHTML = '<div class="chat-empty">Could not load chat — <button class="btn btn-secondary btn-sm" onclick="openChat()">Retry</button></div>';
+            });
+        }
+
+        function chatLoadList() {
+            return chatFetch().then(({ ok, data }) => {
+                if (!ok) throw new Error('list failed');
+                chatConversations = Array.isArray(data.conversations) ? data.conversations : [];
+                chatMembers = Array.isArray(data.members) ? data.members : [];
+                renderChatTabs();
+                updateChatBadge(chatTotalUnread());
+                return data;
+            });
+        }
+
+        function chatLoadMessages(reset) {
+            if (!chatActiveId) return Promise.resolve();
+            if (reset) chatLastId = 0;
+            return chatFetch('GET', null, '?conversation=' + chatActiveId + '&after=' + chatLastId).then(({ ok, data }) => {
+                if (!ok) throw new Error('load failed');
+                chatApplyMessages(data.messages || [], chatLastId === 0);
+                // The server marks the conversation read on fetch — refresh its tab.
+                const conv = chatConversations.find(c => c.id === chatActiveId);
+                if (conv && data.conversation) {
+                    conv.unread = data.conversation.unread || 0;
+                    conv.last_id = data.conversation.last_id || conv.last_id;
+                }
+                renderChatTabs();
+                updateChatBadge(chatTotalUnread());
+            }).catch(() => {
+                if (chatLastId === 0) {
+                    document.getElementById('chatMessages').innerHTML = '<div class="chat-empty">Could not load this conversation — <button class="btn btn-secondary btn-sm" onclick="selectChatConversation(' + chatActiveId + ')">Retry</button></div>';
+                }
+            });
         }
 
         function chatPoll() {
             if (!chatIsOpen()) return;
-            chatFetch('GET', null, '?after=' + chatLastId).then(({ ok, data }) => {
-                if (!ok) return;
-                if (Array.isArray(data.messages) && data.messages.length) {
-                    chatApplyMessages(data.messages, false);
-                    markChatSeen();
-                }
-            }).catch(() => {});
+            chatLoadMessages(false).catch(() => {});
+            chatLoadList().catch(() => {});
         }
 
         // Background unread check for the sidebar badge (skipped while the
         // chat page itself is open — chatPoll already keeps it fresh).
         function chatPollBadge() {
             if (chatIsOpen()) return;
-            const seen = chatSeenId();
-            chatFetch('GET', null, '?after=' + seen).then(({ ok, data }) => {
-                if (!ok) return;
-                updateChatBadge((data.messages || []).length);
-            }).catch(() => {});
+            chatLoadList().catch(() => {});
         }
 
-        function renderChatMembers(members) {
+        function renderChatTabs() {
+            const el = document.getElementById('chatTabs');
+            if (!el) return;
+            let html = chatConversations.map(c => {
+                const active = c.id === chatActiveId;
+                const icon = c.kind === 'page' ? 'fa-users' : 'fa-user';
+                const label = c.kind === 'page' ? 'Team' : bfEscapeHtml(c.name || 'Direct chat');
+                const unread = c.unread > 0 ? `<span class="chat-tab-unread">${c.unread > 99 ? '99+' : c.unread}</span>` : '';
+                return `<button class="chat-tab ${active ? 'active' : ''}" onclick="selectChatConversation(${c.id})"><i class="fas ${icon}"></i> ${label}${unread}</button>`;
+            }).join('');
+            html += `<button class="chat-tab" style="color:var(--accent-blue);" onclick="openChatPeopleModal()" title="Start a 1-on-1 chat"><i class="fas fa-plus"></i> New chat</button>`;
+            el.innerHTML = html;
+            const active = chatConversations.find(c => c.id === chatActiveId);
             const sub = document.getElementById('chatSubtitle');
             if (!sub) return;
-            const me = (BF_BOOTSTRAP.email || '').toLowerCase();
-            const names = (members || [])
-                .filter(m => (m.email || '').toLowerCase() !== me)
-                .map(m => (m.name || m.email || 'Someone') + (m.role === 'viewer' ? ' (viewer)' : ''));
-            if (!names.length) { sub.textContent = 'Share your page from Settings to start chatting.'; return; }
-            sub.textContent = names.length <= 3 ? 'With ' + names.join(', ') : 'With ' + names.slice(0, 3).join(', ') + ' and ' + (names.length - 3) + ' more';
+            if (active && active.kind === 'direct') {
+                sub.textContent = '1-on-1 with ' + (active.name || 'this person') + ' — only the two of you can see it.';
+            } else if (active) {
+                const me = (BF_BOOTSTRAP.email || '').toLowerCase();
+                const others = chatMembers.filter(m => (m.email || '').toLowerCase() !== me)
+                    .map(m => (m.name || m.email || 'Someone') + (m.role === 'viewer' ? ' (viewer)' : ''));
+                sub.textContent = others.length
+                    ? 'Team chat — with ' + (others.length <= 3 ? others.join(', ') : others.slice(0, 3).join(', ') + ' and ' + (others.length - 3) + ' more') + '.'
+                    : 'Team chat — share your page from Settings to invite people.';
+            } else {
+                sub.textContent = 'Talk with everyone who shares this page.';
+            }
+        }
+
+        function selectChatConversation(id) {
+            if (chatActiveId === id) return;
+            chatActiveId = id;
+            chatLastId = 0;
+            setChatInputState();
+            renderChatTabs();
+            document.getElementById('chatMessages').innerHTML = '<div class="chat-empty">Loading conversation…</div>';
+            chatLoadMessages(true).catch(() => {});
         }
 
         function chatApplyMessages(list, isInitial) {
@@ -2599,7 +2688,7 @@
             const me = (BF_BOOTSTRAP.email || '').toLowerCase();
             const mine = !!me && (m.email || '').toLowerCase() === me;
             const isPageOwner = !(BF_BOOTSTRAP.sharing && BF_BOOTSTRAP.sharing.viewing_shared);
-            const canDelete = chatCanPost && (mine || isPageOwner);
+            const canDelete = chatCanPostNow() && (mine || isPageOwner);
             const who = mine ? '' : `<div class="chat-who">${bfEscapeHtml(m.sender || m.email || 'Someone')}</div>`;
             const del = canDelete ? `<button class="chat-del" title="Delete message" onclick="deleteChatMessage(${m.id})"><i class="fas fa-times"></i></button>` : '';
             return `<div class="chat-row ${mine ? 'mine' : 'other'}" data-id="${m.id}">${who}<div class="chat-bubble">${bfEscapeHtml(m.body || '')}</div><div class="chat-meta"><span>${bfEscapeHtml(chatFormatTime(m.created_at))}</span>${del}</div></div>`;
@@ -2616,25 +2705,29 @@
             return d.toLocaleDateString('en-US', opts) + ', ' + hm;
         }
 
-        function chatInputKey(e) { if (e.key === 'Enter') { e.preventDefault(); sendChatMessage(); } }
+        function chatInputKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChatMessage(); } }
 
         function sendChatMessage() {
             if (chatSending) return;
-            if (!chatCanPost) { showToast('View-only access — you cannot send messages.', 'error'); return; }
             const input = document.getElementById('chatInput');
             const text = (input.value || '').trim();
             if (!text) return;
+            if (!chatCanPostNow()) { showToast('View-only access — you cannot send messages.', 'error'); return; }
+            if (!chatActiveId) { showToast('Pick a conversation first.', 'error'); return; }
             chatSending = true;
             document.getElementById('chatSendBtn').disabled = true;
-            chatFetch('POST', { body: text }).then(({ ok, data }) => {
+            chatFetch('POST', { conversation: chatActiveId, body: text }).then(({ ok, data }) => {
                 chatSending = false;
-                document.getElementById('chatSendBtn').disabled = false;
+                setChatInputState();
                 if (!ok) { showToast((data && data.error) || 'Message not sent.', 'error'); return; }
                 input.value = '';
-                if (data.message) { chatApplyMessages([data.message], false); markChatSeen(); }
+                autosizeChatInput();
+                if (data.message) chatApplyMessages([data.message], false);
+                const conv = chatConversations.find(c => c.id === chatActiveId);
+                if (conv && data.message) { conv.last_id = data.message.id; conv.last_body = data.message.body; }
             }).catch(() => {
                 chatSending = false;
-                document.getElementById('chatSendBtn').disabled = false;
+                setChatInputState();
                 showToast('Message not sent — check your connection.', 'error');
             });
         }
@@ -2647,6 +2740,35 @@
                 if (row) row.remove();
                 showToast('Message deleted.', 'info');
             }).catch(() => showToast('Could not delete that message.', 'error'));
+        }
+
+        // ---- 1-on-1 chat picker ----
+        function openChatPeopleModal() {
+            const me = (BF_BOOTSTRAP.email || '').toLowerCase();
+            const others = chatMembers.filter(m => (m.email || '').toLowerCase() !== me);
+            const el = document.getElementById('chatPeopleList');
+            el.innerHTML = others.length ? others.map(m => `
+                <div class="setting-row" style="align-items:center;">
+                    <div class="setting-info"><h4 style="font-size:14px;">${bfEscapeHtml(m.name || m.email)}${m.role === 'viewer' ? ' <span style="color:var(--text-muted);font-weight:400;">(viewer)</span>' : ''}</h4><p>${bfEscapeHtml(m.email)}</p></div>
+                    <button class="btn btn-primary btn-sm" onclick="startDirectChat('${bfEscapeHtml(m.email)}')"><i class="fas fa-comment"></i> Chat</button>
+                </div>`).join('')
+                : '<p style="color:var(--text-muted);font-size:13px;">No one else has access to this page yet — invite people from Settings → Sharing first.</p>';
+            document.getElementById('chatPeopleModal').classList.add('active');
+        }
+
+        function closeChatPeopleModal() { document.getElementById('chatPeopleModal').classList.remove('active'); }
+
+        function startDirectChat(email) {
+            chatFetch('POST', { direct: email, body: '' }).then(({ ok, data }) => {
+                if (!ok) { showToast((data && data.error) || 'Could not start that chat.', 'error'); return; }
+                closeChatPeopleModal();
+                return chatLoadList().then(() => {
+                    if (data.conversation) { chatActiveId = data.conversation.id; chatLastId = 0; }
+                    renderChatTabs();
+                    document.getElementById('chatMessages').innerHTML = '<div class="chat-empty">Loading conversation…</div>';
+                    chatLoadMessages(true).catch(() => {});
+                });
+            }).catch(() => showToast('Could not start that chat.', 'error'));
         }
 
         // ============ PAYCHECK PLAN (multiple plans) ============
@@ -3746,7 +3868,7 @@
         document.getElementById('bankImportModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeBankImportModal();});
         document.getElementById('setBalanceModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeSetBalanceModal();});
         document.getElementById('budgetEditModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeBudgetEditModal();});
-        document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();closePaymentModal();closeBulkPaymentModal();closeAccountModal();closeUnpayModal();closeBudgetEditModal();closeDepositModal();closeBankImportModal();closeSetBalanceModal();closeImportPreviewModal();closeImportModal();closeRestoreModal();}if(e.key==='n'&&e.ctrlKey){e.preventDefault();openModal();}});
+        document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();closePaymentModal();closeBulkPaymentModal();closeAccountModal();closeUnpayModal();closeBudgetEditModal();closeDepositModal();closeBankImportModal();closeSetBalanceModal();closeImportPreviewModal();closeImportModal();closeRestoreModal();closeChatPeopleModal();}if(e.key==='n'&&e.ctrlKey){e.preventDefault();openModal();}});
 
         // ============================================================
         // SERVER-SYNCED STATE (replaces the old localStorage store)
@@ -4192,6 +4314,8 @@
             }
             const rm = document.getElementById('restoreModal');
             if (rm) rm.addEventListener('click', e => { if (e.target === e.currentTarget) closeRestoreModal(); });
+            const cpm = document.getElementById('chatPeopleModal');
+            if (cpm) cpm.addEventListener('click', e => { if (e.target === e.currentTarget) closeChatPeopleModal(); });
         })();
 
         // Load saved theme on startup

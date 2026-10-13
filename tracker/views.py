@@ -10,7 +10,7 @@ from django.shortcuts import redirect, render
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods
 
-from .models import ChatMessage, Membership, PendingInvite, UserData
+from .models import ChatConversation, ChatMessage, ChatParticipant, ChatRead, Membership, PendingInvite, UserData
 
 MAX_STATE_BYTES = 5 * 1024 * 1024  # 5 MB is plenty for thousands of bills
 
@@ -335,6 +335,7 @@ def _display_name(user):
 def _chat_message_dict(m):
     return {
         'id': m.id,
+        'conversation': m.conversation_id,
         'sender': _display_name(m.sender),
         'email': m.sender.email,
         'body': m.body,
@@ -342,20 +343,117 @@ def _chat_message_dict(m):
     }
 
 
+def _ensure_team_conversation(owner):
+    conv, _created = ChatConversation.objects.get_or_create(
+        page_owner=owner, kind=ChatConversation.KIND_PAGE)
+    return conv
+
+
+def _unread_count(conv, user):
+    read = ChatRead.objects.filter(conversation=conv, user=user).first()
+    last_read = read.last_read_id if read else 0
+    return conv.messages.filter(id__gt=last_read).count()
+
+
+def _mark_read(conv, user, up_to=None):
+    """Advance the user's read marker (never backwards)."""
+    if up_to is None:
+        up_to = conv.messages.order_by('-id').values_list('id', flat=True).first() or 0
+    read = ChatRead.objects.filter(conversation=conv, user=user).first()
+    if read and read.last_read_id >= up_to:
+        return
+    ChatRead.objects.update_or_create(
+        conversation=conv, user=user, defaults={'last_read_id': up_to})
+
+
+def _conversation_dict(conv, user):
+    last = conv.messages.select_related('sender').order_by('-id').first()
+    other = conv.participants_for(user)
+    return {
+        'id': conv.id,
+        'kind': conv.kind,
+        'name': _display_name(other) if other else 'Team chat',
+        'peer_email': other.email if other else '',
+        'unread': _unread_count(conv, user),
+        'last_id': last.id if last else 0,
+        'last_body': last.body[:120] if last else '',
+        'last_sender': _display_name(last.sender) if last else '',
+        'last_at': last.created_at if last else None,
+    }
+
+
+def _visible_conversations(owner, user):
+    """The team chat plus the user's own direct chats on this page."""
+    team = _ensure_team_conversation(owner)
+    direct_ids = list(ChatParticipant.objects.filter(
+        conversation__page_owner=owner,
+        conversation__kind=ChatConversation.KIND_DIRECT,
+        user=user,
+    ).values_list('conversation_id', flat=True))
+    direct = []
+    for conv in ChatConversation.objects.filter(id__in=direct_ids).prefetch_related('participants__user'):
+        other = conv.participants_for(user)
+        # Hide a direct chat when the other person no longer has page access.
+        if other is None or (other != owner and not Membership.objects.filter(owner=owner, member=other).exists()):
+            continue
+        direct.append(conv)
+    return [team] + direct
+
+
+def _get_visible_conversation(conv_id, owner, user):
+    """Fetch a conversation of this page the user may open, or None."""
+    try:
+        conv = ChatConversation.objects.get(pk=int(conv_id), page_owner=owner)
+    except (ChatConversation.DoesNotExist, TypeError, ValueError):
+        return None
+    if conv.kind == ChatConversation.KIND_DIRECT and not conv.participants.filter(user=user).exists():
+        return None
+    return conv
+
+
 @login_required
 @require_http_methods(['GET', 'POST', 'DELETE'])
 def api_chat(request):
-    """Chat thread of the page currently being viewed.
+    """Chat for the page currently being viewed.
 
-    The page owner and everyone with access share one conversation.
-    Editors and the owner can post and delete their own messages; the
-    page owner can delete anything on their page; viewers are read-only.
-    GET ?after=<id> returns only messages newer than that id (polling).
+    Every page has a team conversation shared with everyone who has
+    access, plus 1-on-1 direct chats between any two of those people.
+
+    GET                          -> conversation list (unread counts) + members
+    GET ?conversation=<id> [&after=<id>]
+                                 -> messages of one conversation; marks it read
+    POST {conversation, body}    -> send to a conversation
+    POST {direct: <email>, [body]}
+                                 -> start (or reuse) a 1-on-1 chat, optionally
+                                    with a first message
+    DELETE {id}                  -> remove a message (its sender, or the page
+                                    owner for team-chat moderation)
     """
     owner, role = _resolve_active_page(request)
 
     if request.method == 'GET':
-        qs = ChatMessage.objects.filter(page_owner=owner).select_related('sender')
+        conv_id = (request.GET.get('conversation') or '').strip()
+        if not conv_id:
+            members = [
+                {'name': _display_name(owner), 'email': owner.email, 'role': 'owner'}
+            ] + [
+                {'name': _display_name(m.member), 'email': m.member.email, 'role': m.role}
+                for m in Membership.objects.filter(owner=owner)
+                                           .select_related('member').order_by('created_at')
+            ]
+            convs = [_conversation_dict(c, request.user)
+                     for c in _visible_conversations(owner, request.user)]
+            return JsonResponse({
+                'page_owner': owner.id,
+                'can_post': role != 'viewer',
+                'members': members,
+                'conversations': convs,
+            })
+
+        conv = _get_visible_conversation(conv_id, owner, request.user)
+        if conv is None:
+            return HttpResponseNotFound('No such conversation')
+        qs = conv.messages.select_related('sender')
         after_raw = (request.GET.get('after') or '').strip()
         try:
             if after_raw:
@@ -365,18 +463,11 @@ def api_chat(request):
                 messages = list(qs.order_by('-id')[:CHAT_PAGE_LIMIT])[::-1]
         except ValueError:
             return HttpResponseBadRequest('Invalid after value')
-
-        members = [
-            {'name': _display_name(owner), 'email': owner.email, 'role': 'owner'}
-        ] + [
-            {'name': _display_name(m.member), 'email': m.member.email, 'role': m.role}
-            for m in Membership.objects.filter(owner=owner)
-                                       .select_related('member').order_by('created_at')
-        ]
+        _mark_read(conv, request.user)
         return JsonResponse({
             'page_owner': owner.id,
             'can_post': role != 'viewer',
-            'members': members,
+            'conversation': _conversation_dict(conv, request.user),
             'messages': [_chat_message_dict(m) for m in messages],
         })
 
@@ -386,22 +477,56 @@ def api_chat(request):
     payload = _json_body(request)
     if payload is None:
         return HttpResponseBadRequest('Invalid JSON')
+    body = str(payload.get('body', '')).strip()
 
     if request.method == 'POST':
-        body = str(payload.get('body', '')).strip()
+        direct = str(payload.get('direct') or '').strip()
+        if direct:
+            # Start (or reuse) a 1-on-1 chat with another person on this page.
+            target = get_user_model().objects.filter(email__iexact=direct).first()
+            if target is None and direct.isdigit():
+                target = get_user_model().objects.filter(pk=int(direct)).first()
+            if target is None:
+                return HttpResponseBadRequest('No such person')
+            if target == request.user:
+                return HttpResponseBadRequest("That's you")
+            if target != owner and not Membership.objects.filter(owner=owner, member=target).exists():
+                return HttpResponseBadRequest('That person does not have access to this page')
+            conv = ChatConversation.objects.filter(
+                page_owner=owner, kind=ChatConversation.KIND_DIRECT,
+                participants__user=request.user,
+            ).filter(participants__user=target).first()
+            if conv is None:
+                conv = ChatConversation.objects.create(page_owner=owner, kind=ChatConversation.KIND_DIRECT)
+                ChatParticipant.objects.create(conversation=conv, user=request.user)
+                ChatParticipant.objects.create(conversation=conv, user=target)
+            if not body:
+                return JsonResponse({'ok': True, 'conversation': _conversation_dict(conv, request.user)})
+        else:
+            conv = _get_visible_conversation(payload.get('conversation'), owner, request.user)
+            if conv is None:
+                return HttpResponseBadRequest('Pick a valid conversation')
+
         if not body:
             return HttpResponseBadRequest('Message cannot be empty')
         msg = ChatMessage.objects.create(
-            page_owner=owner, sender=request.user, body=body[:MAX_CHAT_BODY])
+            conversation=conv, page_owner=owner, sender=request.user, body=body[:MAX_CHAT_BODY])
+        _mark_read(conv, request.user, msg.id)
         return JsonResponse({'ok': True, 'message': _chat_message_dict(msg)})
 
-    # DELETE - senders may remove their own messages; the page owner may
-    # moderate any message on their page.
+    # DELETE - a message's sender can always remove it; the page owner can
+    # also moderate anything in the team chat.
     try:
-        msg = ChatMessage.objects.get(page_owner=owner, pk=int(payload.get('id')))
+        msg = ChatMessage.objects.select_related('conversation').get(
+            pk=int(payload.get('id')), page_owner=owner)
     except (ChatMessage.DoesNotExist, TypeError, ValueError):
         return HttpResponseNotFound('No such message')
-    if msg.sender != request.user and owner != request.user:
+    conv = msg.conversation
+    if conv.kind == ChatConversation.KIND_DIRECT and not conv.participants.filter(user=request.user).exists():
+        return HttpResponseNotFound('No such message')
+    can_delete = msg.sender == request.user or (
+        conv.kind == ChatConversation.KIND_PAGE and owner == request.user)
+    if not can_delete:
         return JsonResponse({'error': 'You can only delete your own messages.'}, status=403)
     msg.delete()
     return JsonResponse({'ok': True})

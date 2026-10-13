@@ -65,12 +65,14 @@ Notes:
   budgets, paycheck plans, custom categories and the app name) as a
   `billflow_backup_YYYY-MM-DD.json` file, and can restore it later — handy after
   clearing data, moving devices, or starting a fresh account.
-- **Chat** (sidebar → System) gives every page its own conversation between the
-  owner and everyone it's shared with. Editors and the owner can post and
-  delete their own messages (the owner can moderate anything on their page);
-  viewers are read-only. Messages refresh every few seconds while the Chat
-  page is open, and a sidebar badge shows unread messages otherwise. The API
-  lives at `/api/chat/` (`GET`/`POST`/`DELETE`, `?after=<id>` for polling).
+- **Chat** (sidebar → System) gives every page a **team chat** shared with
+  everyone who has access, plus **1-on-1 direct chats** between any two of
+  those people (New chat → pick someone; DMs stay between the two of you).
+  Conversation tabs show unread counts (tracked server-side), the sidebar
+  badge totals them, and messages refresh every few seconds while the Chat
+  page is open. Editors and the owner can post and delete their own messages
+  (the owner moderates the team chat); viewers are read-only. The API lives
+  at `/api/chat/` (`GET` list/messages, `POST` send/start-DM, `DELETE`).
 - **Recurring bills show "Scheduled" in future months.** In All Bills, use the
   month navigator to see upcoming months: a recurring bill you already paid
   this month reads *Scheduled* there (with its next occurrence date), gets its
