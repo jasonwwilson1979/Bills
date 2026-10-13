@@ -65,6 +65,12 @@ Notes:
   budgets, paycheck plans, custom categories and the app name) as a
   `billflow_backup_YYYY-MM-DD.json` file, and can restore it later — handy after
   clearing data, moving devices, or starting a fresh account.
+- **Chat** (sidebar → System) gives every page its own conversation between the
+  owner and everyone it's shared with. Editors and the owner can post and
+  delete their own messages (the owner can moderate anything on their page);
+  viewers are read-only. Messages refresh every few seconds while the Chat
+  page is open, and a sidebar badge shows unread messages otherwise. The API
+  lives at `/api/chat/` (`GET`/`POST`/`DELETE`, `?after=<id>` for polling).
 
 ## Deploying to an Ubuntu server
 

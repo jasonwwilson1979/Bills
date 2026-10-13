@@ -5,12 +5,12 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.core.validators import validate_email
-from django.http import HttpResponseBadRequest, JsonResponse
+from django.http import HttpResponseBadRequest, HttpResponseNotFound, JsonResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods
 
-from .models import Membership, PendingInvite, UserData
+from .models import ChatMessage, Membership, PendingInvite, UserData
 
 MAX_STATE_BYTES = 5 * 1024 * 1024  # 5 MB is plenty for thousands of bills
 
@@ -62,7 +62,7 @@ def home(request):
     }
     sharing_json = json.dumps(
         {'viewing_shared': sharing['viewing_shared'], 'owner_name': owner_name,
-         'role': role, 'readOnly': sharing['readOnly']},
+         'owner_id': owner.id, 'role': role, 'readOnly': sharing['readOnly']},
         separators=(',', ':')).replace('<', '\\u003c')
 
     return render(request, 'tracker/app.html', {
@@ -321,3 +321,87 @@ def api_sharing_select(request):
     else:
         request.session['bf_active_page'] = 'mine'
     return redirect('home')
+
+
+MAX_CHAT_BODY = 2000
+CHAT_PAGE_LIMIT = 200  # newest messages returned on a full load
+
+
+def _display_name(user):
+    """Best-effort display name, same rule the sidebar/sharing views use."""
+    return (user.get_full_name() or '').strip() or user.email or user.username
+
+
+def _chat_message_dict(m):
+    return {
+        'id': m.id,
+        'sender': _display_name(m.sender),
+        'email': m.sender.email,
+        'body': m.body,
+        'created_at': m.created_at,
+    }
+
+
+@login_required
+@require_http_methods(['GET', 'POST', 'DELETE'])
+def api_chat(request):
+    """Chat thread of the page currently being viewed.
+
+    The page owner and everyone with access share one conversation.
+    Editors and the owner can post and delete their own messages; the
+    page owner can delete anything on their page; viewers are read-only.
+    GET ?after=<id> returns only messages newer than that id (polling).
+    """
+    owner, role = _resolve_active_page(request)
+
+    if request.method == 'GET':
+        qs = ChatMessage.objects.filter(page_owner=owner).select_related('sender')
+        after_raw = (request.GET.get('after') or '').strip()
+        try:
+            if after_raw:
+                after = int(after_raw)
+                messages = list(qs.filter(id__gt=after).order_by('id')[:CHAT_PAGE_LIMIT])
+            else:
+                messages = list(qs.order_by('-id')[:CHAT_PAGE_LIMIT])[::-1]
+        except ValueError:
+            return HttpResponseBadRequest('Invalid after value')
+
+        members = [
+            {'name': _display_name(owner), 'email': owner.email, 'role': 'owner'}
+        ] + [
+            {'name': _display_name(m.member), 'email': m.member.email, 'role': m.role}
+            for m in Membership.objects.filter(owner=owner)
+                                       .select_related('member').order_by('created_at')
+        ]
+        return JsonResponse({
+            'page_owner': owner.id,
+            'can_post': role != 'viewer',
+            'members': members,
+            'messages': [_chat_message_dict(m) for m in messages],
+        })
+
+    if role == 'viewer':
+        return JsonResponse({'error': 'This page is shared with you as view-only.'}, status=403)
+
+    payload = _json_body(request)
+    if payload is None:
+        return HttpResponseBadRequest('Invalid JSON')
+
+    if request.method == 'POST':
+        body = str(payload.get('body', '')).strip()
+        if not body:
+            return HttpResponseBadRequest('Message cannot be empty')
+        msg = ChatMessage.objects.create(
+            page_owner=owner, sender=request.user, body=body[:MAX_CHAT_BODY])
+        return JsonResponse({'ok': True, 'message': _chat_message_dict(msg)})
+
+    # DELETE - senders may remove their own messages; the page owner may
+    # moderate any message on their page.
+    try:
+        msg = ChatMessage.objects.get(page_owner=owner, pk=int(payload.get('id')))
+    except (ChatMessage.DoesNotExist, TypeError, ValueError):
+        return HttpResponseNotFound('No such message')
+    if msg.sender != request.user and owner != request.user:
+        return JsonResponse({'error': 'You can only delete your own messages.'}, status=403)
+    msg.delete()
+    return JsonResponse({'ok': True})

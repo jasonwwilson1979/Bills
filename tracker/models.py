@@ -85,3 +85,34 @@ class PendingInvite(models.Model):
 
     def __str__(self):
         return f'{self.email} -> {self.owner} ({self.role})'
+
+
+class ChatMessage(models.Model):
+    """One message in a page's chat conversation.
+
+    Every page has a single chat thread shared by the page owner and
+    everyone with access (see Membership). Editors and the owner can
+    post; viewers are read-only (enforced in the chat API).
+    """
+
+    page_owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='billflow_chat_messages',
+    )
+    sender = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='billflow_chat_sent',
+    )
+    body = models.TextField(max_length=2000)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['id']
+        indexes = [
+            models.Index(fields=['page_owner', 'id'], name='chat_page_id_idx'),
+        ]
+
+    def __str__(self):
+        return f'{self.sender} -> {self.page_owner} page: {self.body[:30]}'

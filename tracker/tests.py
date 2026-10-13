@@ -519,3 +519,125 @@ class AccountTransactionsTests(TestCase):
         acc = g.json()['data']['accounts'][0]
         self.assertEqual(acc['deposits'], [{'date': '2026-10-01', 'amount': 500, 'note': 'Paycheck'}])
         self.assertEqual(acc['debits'], [{'date': '2026-10-02', 'amount': 20, 'note': 'Coffee shop'}])
+
+
+class ChatApiTests(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(username='owner', email='owner@example.com',
+                                              first_name='Owen', password='pw123456789')
+        self.member = User.objects.create_user(username='member', email='member@example.com',
+                                               password='pw123456789')
+        self.stranger = User.objects.create_user(username='stranger', email='stranger@example.com',
+                                                 password='pw123456789')
+
+    def _grant(self, role='editor'):
+        self.client.force_login(self.owner)
+        r = self.client.post('/api/sharing/', data=json.dumps({'email': 'member@example.com', 'role': role}),
+                             content_type='application/json')
+        self.assertEqual(r.status_code, 200)
+
+    def _select_owner_page(self):
+        self.client.force_login(self.member)
+        r = self.client.post('/api/sharing/select/', data={'page': str(self.owner.pk)})
+        self.assertEqual(r.status_code, 302)
+
+    def test_chat_requires_auth(self):
+        r = self.client.get('/api/chat/')
+        self.assertEqual(r.status_code, 302)
+
+    def test_owner_can_post_and_read(self):
+        self.client.force_login(self.owner)
+        r = self.client.post('/api/chat/', data=json.dumps({'body': '  Hello there  '}),
+                             content_type='application/json')
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.json()['ok'])
+        self.assertEqual(r.json()['message']['body'], 'Hello there')
+        self.assertEqual(r.json()['message']['sender'], 'Owen')
+        g = self.client.get('/api/chat/')
+        data = g.json()
+        self.assertTrue(data['can_post'])
+        self.assertEqual(data['page_owner'], self.owner.pk)
+        self.assertEqual([m['body'] for m in data['messages']], ['Hello there'])
+        self.assertEqual(data['members'][0]['role'], 'owner')
+
+    def test_editor_member_can_post_on_shared_page(self):
+        self._grant('editor')
+        self._select_owner_page()
+        r = self.client.post('/api/chat/', data=json.dumps({'body': 'hi from member'}),
+                             content_type='application/json')
+        self.assertEqual(r.status_code, 200)
+        self.client.force_login(self.owner)
+        g = self.client.get('/api/chat/')
+        data = g.json()
+        self.assertEqual(data['messages'][0]['email'], 'member@example.com')
+        roles = {m['email']: m['role'] for m in data['members']}
+        self.assertEqual(roles['member@example.com'], 'editor')
+
+    def test_viewer_cannot_post_but_can_read(self):
+        self._grant('viewer')
+        self._select_owner_page()
+        r = self.client.post('/api/chat/', data=json.dumps({'body': 'hi'}),
+                             content_type='application/json')
+        self.assertEqual(r.status_code, 403)
+        g = self.client.get('/api/chat/')
+        self.assertEqual(g.status_code, 200)
+        self.assertFalse(g.json()['can_post'])
+
+    def test_empty_body_rejected_and_long_body_truncated(self):
+        self.client.force_login(self.owner)
+        r = self.client.post('/api/chat/', data=json.dumps({'body': '   '}),
+                             content_type='application/json')
+        self.assertEqual(r.status_code, 400)
+        r2 = self.client.post('/api/chat/', data=json.dumps({'body': 'x' * 3000}),
+                              content_type='application/json')
+        self.assertEqual(r2.status_code, 200)
+        self.assertEqual(len(r2.json()['message']['body']), 2000)
+        r3 = self.client.post('/api/chat/', data='not json', content_type='application/json')
+        self.assertEqual(r3.status_code, 400)
+
+    def test_after_returns_only_newer_messages(self):
+        self.client.force_login(self.owner)
+        ids = []
+        for i in range(3):
+            r = self.client.post('/api/chat/', data=json.dumps({'body': f'm{i}'}),
+                                 content_type='application/json')
+            ids.append(r.json()['message']['id'])
+        r2 = self.client.get('/api/chat/?after=%d' % ids[0])
+        self.assertEqual(r2.status_code, 200)
+        self.assertEqual([m['id'] for m in r2.json()['messages']], ids[1:])
+        r3 = self.client.get('/api/chat/?after=abc')
+        self.assertEqual(r3.status_code, 400)
+
+    def test_delete_rules(self):
+        # Owner posts; an editor may not delete someone else's message.
+        self._grant('editor')
+        self.client.force_login(self.owner)
+        r = self.client.post('/api/chat/', data=json.dumps({'body': 'from owner'}),
+                             content_type='application/json')
+        mid = r.json()['message']['id']
+        self._select_owner_page()
+        r2 = self.client.delete('/api/chat/', data=json.dumps({'id': mid}),
+                                content_type='application/json')
+        self.assertEqual(r2.status_code, 403)
+
+        # Editor deletes their own message: allowed.
+        r3 = self.client.post('/api/chat/', data=json.dumps({'body': 'from member'}),
+                              content_type='application/json')
+        mid2 = r3.json()['message']['id']
+        r4 = self.client.delete('/api/chat/', data=json.dumps({'id': mid2}),
+                                content_type='application/json')
+        self.assertEqual(r4.status_code, 200)
+
+        # The page owner can moderate any message on their page.
+        self.client.force_login(self.owner)
+        r5 = self.client.delete('/api/chat/', data=json.dumps({'id': mid}),
+                                content_type='application/json')
+        self.assertEqual(r5.status_code, 200)
+        g = self.client.get('/api/chat/')
+        self.assertEqual(g.json()['messages'], [])
+
+    def test_delete_missing_message_is_404(self):
+        self.client.force_login(self.owner)
+        r = self.client.delete('/api/chat/', data=json.dumps({'id': 999999}),
+                               content_type='application/json')
+        self.assertEqual(r.status_code, 404)
