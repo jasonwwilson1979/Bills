@@ -219,6 +219,13 @@ Open **Settings → Sharing** to give other Google accounts access to your page:
   address you invited. If they sign in with a different account, they'll only
   see their own page; remove the old invite in Settings → Sharing and invite
   the correct address.
+- **Rich bill notes** — the Notes field (bottom of the Add/Edit Bill form)
+  supports bold/italic/underline, clickable links, colored text and an HTML
+  source editor. Notes are sanitized (scripts/handlers stripped) and open in
+  an expandable panel under each bill row wherever bills are listed.
+- **Tag bills in chat** — hit the 💳 button in the chat composer (or type
+  `[[bill:ID]]`) to embed a bill chip; clicking it jumps to the bill in
+  All Bills, opens its month and highlights the row.
 - **Fully responsive on phones** — bill rows reflow to two lines, inputs use
   16px text so iOS Safari doesn't zoom on focus, modals become near-full-width
   sheets, summaries and tab rows wrap, and wide tables scroll instead of

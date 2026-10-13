@@ -956,6 +956,7 @@
                         <div class="chat-input-bar">
                             <textarea id="chatInput" class="form-input chat-input" rows="1" maxlength="2000" placeholder="Type a message… (Enter to send)" onkeydown="chatInputKey(event)" oninput="autosizeChatInput()"></textarea>
                             <button class="btn btn-primary" id="chatSendBtn" onclick="sendChatMessage()"><i class="fas fa-paper-plane"></i> Send</button>
+                            <button class="btn btn-secondary" onclick="openBillTagModal()" title="Tag a bill in this message" style="padding:0 13px;"><i class="fas fa-file-invoice-dollar"></i></button>
                         </div>
                         <div id="chatViewOnlyNote" class="chat-view-only" style="display:none;"><i class="fas fa-eye"></i> View-only access — you can read this conversation but not send messages.</div>
                     </div>
@@ -978,7 +979,6 @@
                     <div class="form-group"><label class="form-label">Category</label><select class="form-select" id="billCategory"></select></div>
                     <div class="form-group"><label class="form-label">Status</label><select class="form-select" id="billStatus"><option value="pending">Pending</option><option value="paid">Paid</option><option value="overdue">Overdue</option></select></div>
                 </div>
-                <div class="form-group"><label class="form-label">Notes (optional)</label><input type="text" class="form-input" id="billNotes" placeholder="Any additional notes..."></div>
                 <div class="form-group">
                     <div class="toggle-group"><div class="toggle" id="payoffToggle" onclick="togglePayoffFields()"></div><span class="toggle-label">Track payoff balance?</span></div>
                     <p class="form-hint">Enable for loans, credit cards, or any bill with a remaining balance</p>
@@ -1013,6 +1013,27 @@
                 </div>
                 <div class="form-group"><div class="toggle-group"><div class="toggle active" id="recurringToggle" onclick="this.classList.toggle('active')"></div><span class="toggle-label">Recurring monthly bill</span></div><p class="form-hint">This bill will repeat every month automatically</p></div>
                 <div class="form-group"><label class="form-label">Default Payment Account (optional)</label><select class="form-select" id="billPreferredAccount"><option value="">No preference — choose at payment time</option></select><p class="form-hint">Auto-select this account when making payments</p></div>
+                <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label">Notes <span style="font-size:11px;color:var(--text-muted);font-weight:400;">optional — formatting, links &amp; colors</span></label>
+                    <div class="rich-toolbar">
+                        <button type="button" onclick="execNote('bold')" title="Bold"><i class="fas fa-bold"></i></button>
+                        <button type="button" onclick="execNote('italic')" title="Italic"><i class="fas fa-italic"></i></button>
+                        <button type="button" onclick="execNote('underline')" title="Underline"><i class="fas fa-underline"></i></button>
+                        <button type="button" onclick="noteAddLink()" title="Add link"><i class="fas fa-link"></i></button>
+                        <button type="button" class="rich-swatch" style="background:#3b82f6;" onclick="noteColor('#3b82f6')" title="Blue text"></button>
+                        <button type="button" class="rich-swatch" style="background:#10b981;" onclick="noteColor('#10b981')" title="Green text"></button>
+                        <button type="button" class="rich-swatch" style="background:#ef4444;" onclick="noteColor('#ef4444')" title="Red text"></button>
+                        <button type="button" class="rich-swatch" style="background:#f59e0b;" onclick="noteColor('#f59e0b')" title="Orange text"></button>
+                        <button type="button" class="rich-swatch" style="background:#8b5cf6;" onclick="noteColor('#8b5cf6')" title="Purple text"></button>
+                        <button type="button" class="rich-swatch rich-swatch-default" onclick="noteColor('#e2e8f0')" title="Default text">A</button>
+                        <button type="button" onclick="execNote('removeFormat')" title="Clear formatting"><i class="fas fa-eraser"></i></button>
+                        <button type="button" id="notesSourceBtn" onclick="toggleNotesSource()" title="Edit the HTML source"><i class="fas fa-code"></i> HTML</button>
+                    </div>
+                    <div id="billNotesEditor" class="rich-editor" contenteditable="true" data-placeholder="Any additional notes…" oninput="syncNotesField()"></div>
+                    <textarea id="billNotesSource" class="rich-source" style="display:none;" spellcheck="false" oninput="syncNotesSourceField()"></textarea>
+                    <textarea id="billNotes" style="display:none;"></textarea>
+                    <p class="form-hint">Notes can be long — they open in a panel under the bill everywhere they are shown.</p>
+                </div>
             </div>
             <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="saveBillBtn" onclick="saveBill()"><i class="fas fa-plus"></i> Add Bill</button></div>
         </div>
@@ -1291,6 +1312,18 @@
         </div>
     </div>
 
+    <!-- BILL TAG PICKER (CHAT) MODAL -->
+    <div class="modal-overlay" id="billTagModal">
+        <div class="modal" style="width:440px;">
+            <div class="modal-header"><h3 class="modal-title"><i class="fas fa-file-invoice-dollar" style="color:var(--accent-blue);margin-right:8px;"></i>Tag a bill</h3><button class="modal-close" onclick="closeBillTagModal()"><i class="fas fa-times"></i></button></div>
+            <div class="modal-body">
+                <input type="text" id="billTagSearch" class="form-input" placeholder="Search bills…" oninput="renderBillTagList()">
+                <div id="billTagList" style="margin-top:12px;max-height:300px;overflow-y:auto;"></div>
+            </div>
+            <div class="modal-footer"><button class="btn btn-secondary" onclick="closeBillTagModal()">Close</button></div>
+        </div>
+    </div>
+
     </div>
 
     <!-- BULK PAY BAR -->
@@ -1446,6 +1479,26 @@
         .chat-tab-unread { background: var(--accent-red); color: #ffffff; font-size: 10.5px; font-weight: 700; min-width: 18px; height: 18px; border-radius: 9px; display: inline-flex; align-items: center; justify-content: center; padding: 0 5px; }
         .chat-input { flex: 1; resize: none; min-height: 46px; max-height: 120px; overflow-y: auto; }
         .chat-view-only { padding: 10px 20px 14px; font-size: 12.5px; color: var(--text-muted); text-align: center; }
+        /* ===== RICH NOTES ===== */
+        .rich-toolbar { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
+        .rich-toolbar button { border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-secondary); border-radius: 8px; min-width: 34px; height: 34px; cursor: pointer; font-size: 13px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; font-family: inherit; transition: var(--transition); }
+        .rich-toolbar button:hover { border-color: var(--accent-blue); color: var(--text-primary); }
+        .rich-swatch { width: 22px !important; min-width: 22px !important; height: 22px !important; padding: 0 !important; border-radius: 50% !important; }
+        .rich-swatch-default { color: var(--text-primary); font-weight: 700; background: var(--bg-input) !important; font-size: 10px; }
+        .rich-editor { min-height: 90px; max-height: 220px; overflow-y: auto; padding: 12px 14px; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: var(--radius-md); font-size: 14px; color: var(--text-primary); white-space: pre-wrap; overflow-wrap: anywhere; }
+        .rich-editor:focus { border-color: var(--accent-blue); box-shadow: 0 0 0 3px rgba(59,130,246,0.15); outline: none; }
+        .rich-editor:empty:before { content: attr(data-placeholder); color: var(--text-muted); pointer-events: none; }
+        .rich-source { width: 100%; min-height: 90px; padding: 12px 14px; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: var(--radius-md); font-family: monospace; font-size: 12px; color: var(--text-primary); resize: vertical; }
+        .bill-notes-panel { grid-column: 1 / -1; display: none; margin: 2px 0 4px 46px; padding: 10px 14px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 10px; font-size: 13px; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; }
+        .bill-notes-panel.open { display: block; }
+        .bill-notes-panel a { color: var(--accent-blue); }
+        .action-btn.note { background: rgba(59,130,246,0.12); color: var(--accent-blue); }
+        .action-btn.note:hover { background: rgba(59,130,246,0.22); }
+        /* Bill tags inside chat messages */
+        .chat-bill-chip { display: inline-flex; align-items: center; gap: 5px; background: rgba(59,130,246,0.25); border: 1px solid rgba(59,130,246,0.45); color: inherit; border-radius: 8px; padding: 2px 9px; font-size: 12.5px; font-weight: 600; cursor: pointer; font-family: inherit; line-height: 1.5; margin: 1px 0; }
+        .chat-bill-chip:hover { background: rgba(59,130,246,0.4); }
+        @keyframes bfRowFlash { 0%,55% { background: rgba(59,130,246,0.16); } 100% { background: transparent; } }
+        .bill-row.flash { animation: bfRowFlash 1.8s ease; }
         @media (max-width: 768px) { .chat-messages { height: 58vh; padding: 14px; } .chat-row { max-width: 85%; } .chat-tabs { padding: 12px 12px 0; } .chat-input-bar { padding: 12px; gap: 8px; } .chat-input { min-height: 42px; } }
     </style>
 
@@ -1576,18 +1629,20 @@
             const showUnpay=st==='paid'&&bill.payments&&bill.payments.length>0;
             const sel=selectedBillIds.has(bill.id);
             const stLabel=st.charAt(0).toUpperCase()+st.slice(1);
-            return `<div class="bill-row${sel?' selected':''}">
+            return `<div class="bill-row${sel?' selected':''}" data-bid="${bill.id}">
                 <input type="checkbox" class="bill-checkbox" ${sel?'checked':''} onclick="event.stopPropagation();toggleBillSelection(${bill.id})" title="Select for bulk payment">
                 <div class="bill-icon ${cat.class}"><i class="fas ${cat.icon}"></i></div>
                 <div class="bill-info"><h4>${bill.name}${bill.recurring?'<span class="recurring-badge"><i class="fas fa-redo"></i> Monthly</span>':''}</h4><p><span class="category-tag ${bill.category}">${cat.label}</span> <span class="bill-status ${st}"><span class="bill-status-dot"></span>${stLabel}</span></p>${getPayoffHTML(bill)}</div>
                 <div class="bill-amount">${isPayoff?`${formatCurrency(bill.amount)}<div style="font-size:11px;color:var(--text-muted);font-weight:500;">/mo</div>`:formatCurrency(bill.amount)}</div>
                 <div class="bill-date">${formatDate(getProjectedDueDate(bill))}</div>
                 <div class="bill-actions">
+                    ${bill.notes?`<button class="action-btn note" onclick="toggleBillNotes(${bill.id})" title="Notes"><i class="fas fa-note-sticky"></i></button>`:''}
                     ${needsPay?`<button class="action-btn pay" onclick="openPaymentModal(${bill.id})" title="Pay"><i class="fas fa-dollar-sign"></i></button>`:''}
                     ${showUnpay?`<button class="action-btn unpay" onclick="openUnpayModal(${bill.id})" title="Unpay"><i class="fas fa-undo"></i></button>`:''}
                     <button class="action-btn edit" onclick="editBill(${bill.id})" title="Edit"><i class="fas fa-pen"></i></button>
                     <button class="action-btn delete" onclick="deleteBill(${bill.id})" title="Delete"><i class="fas fa-trash"></i></button>
                 </div>
+                ${bill.notes?`<div class="bill-notes-panel" id="billNotesPanel-${bill.id}">${bfSanitizeRich(bill.notes)}</div>`:''}
             </div>`;
         }
 
@@ -2228,7 +2283,7 @@
         }
 
         // NAVIGATION
-        function switchPage(p) { document.querySelectorAll('.page-section').forEach(s=>s.classList.remove('active')); document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active')); document.getElementById(`page-${p}`).classList.add('active'); document.querySelector(`.nav-item[data-page="${p}"]`).classList.add('active'); document.getElementById('sidebar').classList.remove('open'); chatSwitchHook(p); }
+        function switchPage(p) { document.querySelectorAll('.page-section').forEach(s=>s.classList.remove('active')); document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active')); document.getElementById(`page-${p}`).classList.add('active'); document.querySelector(`.nav-item[data-page="${p}"]`).classList.add('active'); window.scrollTo(0, 0); document.getElementById('sidebar').classList.remove('open'); chatSwitchHook(p); }
         function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); }
         function filterBills(f,el) { currentFilter=f; if(el){el.closest('.filter-tabs').querySelectorAll('.filter-tab').forEach(t=>t.classList.remove('active'));el.classList.add('active');} renderDashboardBills(); }
         function filterAllBills(f,el) { currentFilter=f; if(el){el.closest('.filter-tabs').querySelectorAll('.filter-tab').forEach(t=>t.classList.remove('active'));el.classList.add('active');} renderAllBills(); }
@@ -2246,7 +2301,7 @@
             if(bill){
                 document.getElementById('billName').value=bill.name;document.getElementById('billAmount').value=bill.amount;
                 document.getElementById('billDueDate').value=bill.dueDate;document.getElementById('billCategory').value=bill.category;
-                document.getElementById('billStatus').value=bill.status;document.getElementById('billNotes').value=bill.notes||'';
+                document.getElementById('billStatus').value=bill.status;loadBillNotesEditor(bill.notes||'');
                 document.getElementById('billTotalOwed').value=bill.totalOwed||'';
                 document.getElementById('billInterestRate').value=bill.interestRate||'';
                 document.getElementById('billPreferredAccount').value=bill.preferredAccountId||'';
@@ -2271,7 +2326,7 @@
                 document.getElementById('billName').value='';document.getElementById('billAmount').value='';
                 document.getElementById('billDueDate').value=new Date().toISOString().split('T')[0];
                 document.getElementById('billCategory').value='utilities';document.getElementById('billStatus').value='pending';
-                document.getElementById('billNotes').value='';document.getElementById('billTotalOwed').value='';
+                loadBillNotesEditor('');document.getElementById('billTotalOwed').value='';
                 document.getElementById('billPreferredAccount').value='';
                 document.getElementById('recurringToggle').classList.add('active');pt.classList.remove('active');pf.style.display='none';
             }
@@ -2753,7 +2808,7 @@
             const canDelete = chatCanPostNow() && (mine || isPageOwner);
             const who = mine ? '' : `<div class="chat-who">${bfEscapeHtml(m.sender || m.email || 'Someone')}</div>`;
             const del = canDelete ? `<button class="chat-del" title="Delete message" onclick="deleteChatMessage(${m.id})"><i class="fas fa-times"></i></button>` : '';
-            return `<div class="chat-row ${mine ? 'mine' : 'other'}" data-id="${m.id}">${who}<div class="chat-bubble">${bfEscapeHtml(m.body || '')}</div><div class="chat-meta"><span>${bfEscapeHtml(chatFormatTime(m.created_at))}</span>${del}</div></div>`;
+            return `<div class="chat-row ${mine ? 'mine' : 'other'}" data-id="${m.id}">${who}<div class="chat-bubble">${chatLinkBills(bfEscapeHtml(m.body || ''))}</div><div class="chat-meta"><span>${bfEscapeHtml(chatFormatTime(m.created_at))}</span>${del}</div></div>`;
         }
 
         function chatFormatTime(iso) {
@@ -2802,6 +2857,152 @@
                 if (row) row.remove();
                 showToast('Message deleted.', 'info');
             }).catch(() => showToast('Could not delete that message.', 'error'));
+        }
+
+        // ============ RICH NOTES (bill modal) ============
+        const BF_RICH_ALLOWED = { B: 1, STRONG: 1, I: 1, EM: 1, U: 1, S: 1, STRIKE: 1, BR: 1, P: 1, DIV: 1, SPAN: 1, A: 1, UL: 1, OL: 1, LI: 1, FONT: 1 };
+
+        // Whitelist sanitizer: keeps basic formatting, safe links and colors;
+        // strips scripts, styles, event handlers and everything else.
+        function bfSanitizeRich(html) {
+            let doc;
+            try { doc = new DOMParser().parseFromString(String(html || ''), 'text/html'); }
+            catch (e) { return bfEscapeHtml(String(html || '')); }
+            const ser = node => {
+                let out = '';
+                node.childNodes.forEach(ch => {
+                    if (ch.nodeType === 3) { out += bfEscapeHtml(ch.nodeValue); return; }
+                    if (ch.nodeType !== 1) return;
+                    const tag = ch.tagName;
+                    if (tag === 'SCRIPT' || tag === 'STYLE') return;
+                    if (!BF_RICH_ALLOWED[tag]) { out += ser(ch); return; } // unwrap unknown tags, keep text
+                    const kids = ser(ch);
+                    if (tag === 'A') {
+                        const href = String(ch.getAttribute('href') || '').trim();
+                        if (/^(https?:\/\/|mailto:)/i.test(href)) {
+                            out += '<a href="' + bfEscapeHtml(href) + '" target="_blank" rel="noopener noreferrer">' + (kids || bfEscapeHtml(href)) + '</a>';
+                        } else out += kids;
+                    } else if (tag === 'FONT') {
+                        const color = String(ch.getAttribute('color') || '').trim();
+                        out += /^#[0-9a-fA-F]{3,6}$/.test(color) ? '<font color="' + color + '">' + kids + '</font>' : kids;
+                    } else if (tag === 'SPAN') {
+                        const m = (ch.getAttribute('style') || '').match(/color\s*:\s*(#[0-9a-fA-F]{3,6})/i);
+                        out += m ? '<span style="color:' + m[1] + '">' + kids + '</span>' : kids;
+                    } else {
+                        out += '<' + tag.toLowerCase() + '>' + kids + '</' + tag.toLowerCase() + '>';
+                    }
+                });
+                return out;
+            };
+            return ser(doc.body);
+        }
+
+        function noteEditorEl() { return document.getElementById('billNotesEditor'); }
+        function syncNotesField() {
+            document.getElementById('billNotes').value = bfSanitizeRich(noteEditorEl().innerHTML);
+        }
+        function syncNotesSourceField() {
+            document.getElementById('billNotes').value = bfSanitizeRich(document.getElementById('billNotesSource').value);
+        }
+        function loadBillNotesEditor(html) {
+            const clean = bfSanitizeRich(html);
+            noteEditorEl().innerHTML = clean;
+            document.getElementById('billNotes').value = clean;
+            document.getElementById('billNotesSource').value = clean;
+            document.getElementById('billNotesSource').style.display = 'none';
+            noteEditorEl().style.display = 'block';
+            document.getElementById('notesSourceBtn').innerHTML = '<i class="fas fa-code"></i> HTML';
+        }
+        function execNote(cmd, val) {
+            noteEditorEl().focus();
+            document.execCommand(cmd, false, val || null);
+            syncNotesField();
+        }
+        function noteAddLink() {
+            const url = prompt('Link URL:', 'https://');
+            if (!url) return;
+            if (!/^(https?:\/\/|mailto:)/i.test(url.trim())) { showToast('Links must start with http://, https:// or mailto:', 'error'); return; }
+            execNote('createLink', url.trim());
+        }
+        function noteColor(color) { execNote('foreColor', color); }
+        function toggleNotesSource() {
+            const ed = noteEditorEl(), src = document.getElementById('billNotesSource');
+            const goingToSource = src.style.display !== 'block';
+            if (goingToSource) {
+                src.value = bfSanitizeRich(ed.innerHTML);
+                ed.style.display = 'none';
+                src.style.display = 'block';
+                document.getElementById('notesSourceBtn').innerHTML = '<i class="fas fa-eye"></i> Visual';
+                src.focus();
+            } else {
+                ed.innerHTML = bfSanitizeRich(src.value);
+                syncNotesField();
+                src.style.display = 'none';
+                ed.style.display = 'block';
+                document.getElementById('notesSourceBtn').innerHTML = '<i class="fas fa-code"></i> HTML';
+            }
+        }
+        function toggleBillNotes(id) {
+            const el = document.getElementById('billNotesPanel-' + id);
+            if (el) el.classList.toggle('open');
+        }
+
+        // ============ BILL TAGS IN CHAT ============
+        function chatLinkBills(escapedBody) {
+            return escapedBody.replace(/\[\[bill:(\d+)\]\]/g, (m0, id) => {
+                const bid = parseInt(id, 10);
+                const b = bills.find(x => x.id === bid);
+                const label = b ? b.name : 'deleted bill';
+                return `<button class="chat-bill-chip" onclick="openBillFromChat(${bid})" title="Open this bill"><i class="fas fa-file-invoice-dollar"></i> ${bfEscapeHtml(label)}</button>`;
+            });
+        }
+        function openBillTagModal() {
+            document.getElementById('billTagSearch').value = '';
+            renderBillTagList();
+            document.getElementById('billTagModal').classList.add('active');
+        }
+        function closeBillTagModal() { document.getElementById('billTagModal').classList.remove('active'); }
+        function renderBillTagList() {
+            const q = (document.getElementById('billTagSearch').value || '').toLowerCase();
+            const list = bills.filter(b => !q || b.name.toLowerCase().includes(q)).slice(0, 60);
+            const el = document.getElementById('billTagList');
+            el.innerHTML = list.length ? list.map(b => {
+                const occ = planOccurrence(b);
+                const when = (occ && occ.date) || b.dueDate;
+                return `<div class="setting-row" style="align-items:center;padding:10px 0;">
+                    <div class="setting-info"><h4 style="font-size:14px;">${bfEscapeHtml(b.name)}</h4><p>${formatCurrency(b.amount)}${when ? ' · due ' + formatDate(when) : ''}</p></div>
+                    <button class="btn btn-primary btn-sm" onclick="insertBillTag(${b.id})"><i class="fas fa-plus"></i> Tag</button>
+                </div>`;
+            }).join('') : '<p style="color:var(--text-muted);font-size:13px;">No bills match.</p>';
+        }
+        function insertBillTag(id) {
+            const token = '[[bill:' + id + ']]';
+            const t = document.getElementById('chatInput');
+            const start = (t.selectionStart === null || isNaN(t.selectionStart)) ? t.value.length : t.selectionStart;
+            const end = (t.selectionEnd === null || isNaN(t.selectionEnd)) ? start : t.selectionEnd;
+            t.value = t.value.slice(0, start) + token + t.value.slice(end);
+            closeBillTagModal();
+            t.focus();
+            const pos = start + token.length;
+            try { t.setSelectionRange(pos, pos); } catch (e) {}
+        }
+        function openBillFromChat(id) {
+            const b = bills.find(x => x.id === id);
+            if (!b) { showToast('That bill no longer exists.', 'error'); return; }
+            const occ = planOccurrence(b);
+            const ref = (occ && occ.date) || b.dueDate;
+            if (ref) billsViewDate = new Date(ref + 'T00:00:00');
+            currentFilter = 'all';
+            switchPage('bills');
+            updateMonthNavigatorUI();
+            renderAllBills();
+            const row = document.querySelector('.bill-row[data-bid="' + id + '"]');
+            if (row) {
+                row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                row.classList.remove('flash');
+                void row.offsetWidth;
+                row.classList.add('flash');
+            }
         }
 
         // ---- 1-on-1 chat picker ----
@@ -3930,7 +4131,7 @@
         document.getElementById('bankImportModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeBankImportModal();});
         document.getElementById('setBalanceModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeSetBalanceModal();});
         document.getElementById('budgetEditModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeBudgetEditModal();});
-        document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();closePaymentModal();closeBulkPaymentModal();closeAccountModal();closeUnpayModal();closeBudgetEditModal();closeDepositModal();closeBankImportModal();closeSetBalanceModal();closeImportPreviewModal();closeImportModal();closeRestoreModal();closeChatPeopleModal();}if(e.key==='n'&&e.ctrlKey){e.preventDefault();openModal();}});
+        document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();closePaymentModal();closeBulkPaymentModal();closeAccountModal();closeUnpayModal();closeBudgetEditModal();closeDepositModal();closeBankImportModal();closeSetBalanceModal();closeImportPreviewModal();closeImportModal();closeRestoreModal();closeChatPeopleModal();closeBillTagModal();}if(e.key==='n'&&e.ctrlKey){e.preventDefault();openModal();}});
 
         // ============================================================
         // SERVER-SYNCED STATE (replaces the old localStorage store)
@@ -4378,6 +4579,8 @@
             if (rm) rm.addEventListener('click', e => { if (e.target === e.currentTarget) closeRestoreModal(); });
             const cpm = document.getElementById('chatPeopleModal');
             if (cpm) cpm.addEventListener('click', e => { if (e.target === e.currentTarget) closeChatPeopleModal(); });
+            const btm = document.getElementById('billTagModal');
+            if (btm) btm.addEventListener('click', e => { if (e.target === e.currentTarget) closeBillTagModal(); });
         })();
 
         // Load saved theme on startup

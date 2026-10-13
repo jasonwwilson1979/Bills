@@ -585,6 +585,24 @@ class TemplateScriptTests(TestCase):
                        'renderBillRow(b, view)', "planBillOwes(r.b, r.occ.st)"):
             self.assertIn(needle, html)
 
+    def test_rich_notes_and_bill_tags_exist(self):
+        """Rich notes editor (with sanitizer), expandable note panels, bill
+        tags in chat, and scroll-reset on page switch."""
+        from django.conf import settings
+
+        path = os.path.join(str(settings.BASE_DIR), 'templates', 'tracker', 'app.html')
+        with open(path, encoding='utf-8') as fh:
+            html = fh.read()
+        for needle in ('function bfSanitizeRich(', 'function loadBillNotesEditor(',
+                       'function toggleNotesSource(', 'function toggleBillNotes(',
+                       'function openBillTagModal(', 'function insertBillTag(',
+                       'function openBillFromChat(', 'function chatLinkBills(',
+                       'id="billNotesEditor"', 'contenteditable="true"',
+                       'id="billTagModal"', 'data-bid="${bill.id}"',
+                       'bill-notes-panel', 'chat-bill-chip',
+                       'window.scrollTo(0, 0)'):
+            self.assertIn(needle, html)
+
 
 class AccountTransactionsTests(TestCase):
     def test_account_deposits_and_debits_pass_through(self):
