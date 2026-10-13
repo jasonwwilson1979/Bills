@@ -88,6 +88,7 @@ class AppPageTests(TestCase):
         self.assertIn('state: null', body)   # no saved document yet
         self.assertIn('Jason', body)         # sidebar shows the display name
         self.assertIn('Welcome back, Jason', body)  # personalized dashboard subtitle
+        self.assertIn('name="viewport"', body)  # mobile layout depends on it
         self.assertIn('Sign out', body)
 
     def test_app_page_shows_backup_and_restore_ui(self):
@@ -265,6 +266,32 @@ class SharingTests(TestCase):
         self.assertIn('Owen', body)
         self.assertIn('read-only', body)
         self.assertIn('My BillFlow', body)
+
+    def test_member_lands_on_shared_page_after_login(self):
+        # Owner shares with the member, whose session has no active page yet.
+        self._save_owner_doc(app_name='OwenPage')
+        self.client.force_login(self.owner)
+        self.client.post('/api/sharing/', data=json.dumps({'email': 'member@example.com', 'role': 'editor'}),
+                         content_type='application/json')
+        # force_login fires user_logged_in with the client's request, so the
+        # login signal should point the member's session at the shared page.
+        self.client.force_login(self.member)
+        r = self.client.get('/api/state/')
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.json()['exists'])
+        self.assertEqual(r.json()['data']['appName'], 'OwenPage')
+        body = self.client.get('/').content.decode()
+        self.assertIn('Viewing', body)
+
+    def test_banner_offers_shared_pages_when_on_own_page(self):
+        self.client.force_login(self.owner)
+        self.client.post('/api/sharing/', data=json.dumps({'email': 'member@example.com', 'role': 'editor'}),
+                         content_type='application/json')
+        self.client.force_login(self.member)   # auto-lands on the owner's page
+        self.client.post('/api/sharing/select/', data={'page': 'mine'})
+        body = self.client.get('/').content.decode()
+        self.assertIn('you also have shared access to', body)
+        self.assertIn('Open Owen', body)
 
     def test_pending_invite_activates_on_login(self):
         self._save_owner_doc()

@@ -210,6 +210,15 @@ Open **Settings → Sharing** to give other Google accounts access to your page:
 - **Editor** can change everything on your page (bills, accounts, settings).
 - **Viewer** gets read-only access — the app shows a view-only notice and
   saving is blocked server-side too.
+- **They land on your page automatically** — when someone with access signs
+  in they see your page first, with a banner to switch back to their own.
+  They can switch anytime via that banner or the **Pages** list at the bottom
+  of the sidebar. Their own page (with sample data) is separate — bills are
+  per page, not per person.
+- **The email must match** — access is tied to the Google account whose
+  address you invited. If they sign in with a different account, they'll only
+  see their own page; remove the old invite in Settings → Sharing and invite
+  the correct address.
 - **Remove** takes their access away at any time. Pending invites are listed
   alongside active members and can be removed the same way.
 
