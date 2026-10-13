@@ -528,6 +528,21 @@ class TemplateScriptTests(TestCase):
         self.assertLess(idx_none, idx_media,
                         'hide rule must come before the media query it overrides')
 
+    def test_month_view_supports_scheduled_occurrences(self):
+        """Future months of recurring bills must read 'scheduled' (derived
+        per-occurrence status) instead of the global 'paid' status, and those
+        occurrences must reach the paycheck planner."""
+        from django.conf import settings
+
+        path = os.path.join(str(settings.BASE_DIR), 'templates', 'tracker', 'app.html')
+        with open(path, encoding='utf-8') as fh:
+            html = fh.read()
+        for needle in ('function billMonthStatus(', 'function planOccurrence(',
+                       '.bill-status.scheduled', "filterAllBills('scheduled'",
+                       'Scheduled</button>', 'dot blue',
+                       'renderBillRow(b, view)', "planBillOwes(r.b, r.occ.st)"):
+            self.assertIn(needle, html)
+
 
 class AccountTransactionsTests(TestCase):
     def test_account_deposits_and_debits_pass_through(self):

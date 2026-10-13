@@ -71,6 +71,12 @@ Notes:
   viewers are read-only. Messages refresh every few seconds while the Chat
   page is open, and a sidebar badge shows unread messages otherwise. The API
   lives at `/api/chat/` (`GET`/`POST`/`DELETE`, `?after=<id>` for polling).
+- **Recurring bills show "Scheduled" in future months.** In All Bills, use the
+  month navigator to see upcoming months: a recurring bill you already paid
+  this month reads *Scheduled* there (with its next occurrence date), gets its
+  own blue status badge and filter tab, and automatically appears in the
+  Paycheck Plan when it falls inside a paycheck's coverage window. A month
+  counts as paid only when a payment was actually recorded during it.
 
 ## Deploying to an Ubuntu server
 

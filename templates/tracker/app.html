@@ -122,6 +122,7 @@
         .month-summary-item .dot.green { background:var(--accent-green); }
         .month-summary-item .dot.orange { background:var(--accent-orange); }
         .month-summary-item .dot.red { background:var(--accent-red); }
+        .month-summary-item .dot.blue { background:var(--accent-blue); }
         .month-summary-item .label { font-size:12px; color:var(--text-muted); }
         .month-summary-item .value { font-size:14px; font-weight:700; }
         .month-summary-divider { width:1px; height:24px; background:var(--border-color); }
@@ -177,6 +178,7 @@
         .bill-status.paid { background:rgba(16,185,129,0.12); color:var(--accent-green); }
         .bill-status.pending { background:rgba(245,158,11,0.12); color:var(--accent-orange); }
         .bill-status.overdue { background:rgba(239,68,68,0.12); color:var(--accent-red); }
+        .bill-status.scheduled { background:rgba(59,130,246,0.12); color:var(--accent-blue); }
         .bill-status-dot { width:6px; height:6px; border-radius:50%; background:currentColor; }
 
         .payoff-progress-wrap { margin-top:6px; }
@@ -597,7 +599,7 @@
                 <div class="month-bills-summary" id="monthBillsSummary"></div>
                 <div class="card" style="margin-top:16px;">
                     <div class="card-header">
-                        <div class="filter-tabs"><button class="filter-tab active" onclick="filterAllBills('all', this)">All</button><button class="filter-tab" onclick="filterAllBills('pending', this)">Pending</button><button class="filter-tab" onclick="filterAllBills('paid', this)">Paid</button><button class="filter-tab" onclick="filterAllBills('overdue', this)">Overdue</button></div>
+                        <div class="filter-tabs"><button class="filter-tab active" onclick="filterAllBills('all', this)">All</button><button class="filter-tab" onclick="filterAllBills('pending', this)">Pending</button><button class="filter-tab" onclick="filterAllBills('scheduled', this)">Scheduled</button><button class="filter-tab" onclick="filterAllBills('paid', this)">Paid</button><button class="filter-tab" onclick="filterAllBills('overdue', this)">Overdue</button></div>
                         <div class="filter-tabs"><button class="filter-tab active" onclick="sortBills('date', this)">By Date</button><button class="filter-tab" onclick="sortBills('amount', this)">By Amount</button><button class="filter-tab" onclick="sortBills('name', this)">By Name</button></div>
                     </div>
                     <div id="allBillsContainer"></div>
@@ -1483,16 +1485,21 @@
             return `<div class="payoff-progress-wrap"><div class="payoff-labels"><span>${done?'<span class="paid-off"><i class="fas fa-check-circle"></i> Paid Off!</span>':`<span class="remaining">${formatCurrency(rem)} left</span>`}</span><span>${pct.toFixed(0)}%</span></div><div class="progress-bar"><div class="progress-fill" style="width:${pct}%;background:${done?'var(--gradient-green)':'var(--gradient-blue)'};"></div></div></div>`;
         }
 
-        function renderBillRow(bill) {
+        function renderBillRow(bill, view) {
             const cat=categoryConfig[bill.category]||categoryConfig.other;
             const isPayoff=bill.isPayoff;
-            const needsPay=bill.status!=='paid';
-            const showUnpay=bill.status==='paid'&&bill.payments&&bill.payments.length>0;
+            // In the All Bills month view, recurring bills get a per-month
+            // status: a bill paid this month reads "scheduled" in later months
+            // instead of staying "paid" forever.
+            const st=view?billMonthStatus(bill,view.y,view.m):bill.status;
+            const needsPay=st!=='paid';
+            const showUnpay=st==='paid'&&bill.payments&&bill.payments.length>0;
             const sel=selectedBillIds.has(bill.id);
+            const stLabel=st.charAt(0).toUpperCase()+st.slice(1);
             return `<div class="bill-row${sel?' selected':''}">
                 <input type="checkbox" class="bill-checkbox" ${sel?'checked':''} onclick="event.stopPropagation();toggleBillSelection(${bill.id})" title="Select for bulk payment">
                 <div class="bill-icon ${cat.class}"><i class="fas ${cat.icon}"></i></div>
-                <div class="bill-info"><h4>${bill.name}${bill.recurring?'<span class="recurring-badge"><i class="fas fa-redo"></i> Monthly</span>':''}</h4><p><span class="category-tag ${bill.category}">${cat.label}</span></p>${getPayoffHTML(bill)}</div>
+                <div class="bill-info"><h4>${bill.name}${bill.recurring?'<span class="recurring-badge"><i class="fas fa-redo"></i> Monthly</span>':''}</h4><p><span class="category-tag ${bill.category}">${cat.label}</span> <span class="bill-status ${st}"><span class="bill-status-dot"></span>${stLabel}</span></p>${getPayoffHTML(bill)}</div>
                 <div class="bill-amount">${isPayoff?`${formatCurrency(bill.amount)}<div style="font-size:11px;color:var(--text-muted);font-weight:500;">/mo</div>`:formatCurrency(bill.amount)}</div>
                 <div class="bill-date">${formatDate(getProjectedDueDate(bill))}</div>
                 <div class="bill-actions">
@@ -1582,6 +1589,10 @@
             });
         }
 
+        function bfIsoDate(d) {
+            return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        }
+
         function getProjectedDueDate(bill) {
             if (!bill.recurring) return bill.dueDate;
             const origDate = new Date(bill.dueDate + 'T00:00:00');
@@ -1590,16 +1601,60 @@
             const lastDayOfMonth = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0).getDate();
             day = Math.min(day, lastDayOfMonth);
             viewDate.setDate(day);
-            return viewDate.toISOString().split('T')[0];
+            return bfIsoDate(viewDate);
+        }
+
+        // Effective status of a bill's occurrence in a given month. Recurring
+        // bills repeat monthly but their status is stored per bill, so without
+        // this a bill paid in October would still read "paid" in November.
+        // A month counts as paid when a payment was recorded during it; future
+        // months with no payment yet read as "scheduled".
+        function billMonthStatus(b, y, m) {
+            if (!b.recurring) return b.status;
+            const paidHere = (b.payments || []).some(p => {
+                if (!p || !p.date) return false;
+                const d = new Date(p.date + 'T00:00:00');
+                return !isNaN(d.getTime()) && d.getFullYear() === y && d.getMonth() === m;
+            });
+            if (paidHere) return 'paid';
+            const now = new Date();
+            if (y === now.getFullYear() && m === now.getMonth()) {
+                // This month's occurrence is due: pending before the due day,
+                // overdue after it (the stored status only reflects the last
+                // payment, which may be from an earlier month).
+                const dueDay = Math.min(new Date(b.dueDate + 'T00:00:00').getDate(), new Date(y, m + 1, 0).getDate());
+                return now > new Date(y, m, dueDay, 23, 59, 59) ? 'overdue' : 'pending';
+            }
+            if (y > now.getFullYear() || (y === now.getFullYear() && m > now.getMonth())) return 'scheduled';
+            return 'paid'; // past months without a recorded payment are assumed handled
+        }
+
+        // The occurrence of a bill the current planning cycle cares about:
+        // its due date, or — for a recurring bill already paid — the first
+        // later month without a recorded payment (clamped to short months).
+        function planOccurrence(b) {
+            if (!b.recurring || !b.dueDate) return { date: b.dueDate, st: b.status };
+            const orig = new Date(b.dueDate + 'T00:00:00');
+            if (isNaN(orig.getTime())) return { date: b.dueDate, st: b.status };
+            const day = orig.getDate();
+            let d = new Date(orig.getFullYear(), orig.getMonth(), Math.min(day, new Date(orig.getFullYear(), orig.getMonth() + 1, 0).getDate()));
+            for (let i = 0; i < 24; i++) {
+                const st = billMonthStatus(b, d.getFullYear(), d.getMonth());
+                if (st !== 'paid') return { date: bfIsoDate(d), st: st };
+                const nm = d.getMonth() + 1;
+                d = new Date(d.getFullYear(), nm, Math.min(day, new Date(d.getFullYear(), nm + 1, 0).getDate()));
+            }
+            return { date: bfIsoDate(d), st: 'scheduled' };
         }
 
         function renderAllBills() {
             const c = document.getElementById('allBillsContainer');
             const s = document.getElementById('searchBills')?.value?.toLowerCase() || '';
             const monthBills = getBillsForViewMonth();
+            const view = { y: billsViewDate.getFullYear(), m: billsViewDate.getMonth() };
 
             let f = monthBills.filter(b => {
-                const matchFilter = currentFilter === 'all' || b.status === currentFilter;
+                const matchFilter = currentFilter === 'all' || billMonthStatus(b, view.y, view.m) === currentFilter;
                 const matchSearch = b.name.toLowerCase().includes(s) || b.category.includes(s);
                 return matchFilter && matchSearch;
             });
@@ -1611,19 +1666,23 @@
             // Render month summary
             renderMonthSummary(monthBills);
 
-            c.innerHTML = f.length ? f.map(b => renderBillRow(b)).join('') :
+            c.innerHTML = f.length ? f.map(b => renderBillRow(b, view)).join('') :
                 `<div class="empty-state"><i class="fas fa-calendar-times"></i><h3>No bills for ${monthNames[billsViewDate.getMonth()]} ${billsViewDate.getFullYear()}</h3><p>Try navigating to a different month or add a new bill.</p></div>`;
         }
 
         function renderMonthSummary(monthBills) {
             const container = document.getElementById('monthBillsSummary');
+            const vy = billsViewDate.getFullYear(), vm = billsViewDate.getMonth();
+            const stOf = b => billMonthStatus(b, vy, vm);
             const total = monthBills.reduce((s,b) => s + b.amount, 0);
-            const paid = monthBills.filter(b => b.status === 'paid');
-            const pending = monthBills.filter(b => b.status === 'pending');
-            const overdue = monthBills.filter(b => b.status === 'overdue');
+            const paid = monthBills.filter(b => stOf(b) === 'paid');
+            const pending = monthBills.filter(b => stOf(b) === 'pending');
+            const overdue = monthBills.filter(b => stOf(b) === 'overdue');
+            const scheduled = monthBills.filter(b => stOf(b) === 'scheduled');
             const paidTotal = paid.reduce((s,b) => s + b.amount, 0);
             const pendingTotal = pending.reduce((s,b) => s + b.amount, 0);
             const overdueTotal = overdue.reduce((s,b) => s + b.amount, 0);
+            const scheduledTotal = scheduled.reduce((s,b) => s + b.amount, 0);
 
             const monthLabel = monthNames[billsViewDate.getMonth()] + ' ' + billsViewDate.getFullYear();
             const now = new Date();
@@ -1646,6 +1705,12 @@
                     <span class="label">Pending</span>
                     <span class="value" style="color:var(--accent-orange);">${pending.length} · ${formatCurrency(pendingTotal)}</span>
                 </div>
+                ${scheduled.length ? `<div class="month-summary-divider"></div>
+                <div class="month-summary-item">
+                    <div class="dot blue"></div>
+                    <span class="label">Scheduled</span>
+                    <span class="value" style="color:var(--accent-blue);">${scheduled.length} · ${formatCurrency(scheduledTotal)}</span>
+                </div>` : ''}
                 <div class="month-summary-divider"></div>
                 <div class="month-summary-item">
                     <div class="dot red"></div>
@@ -2611,13 +2676,18 @@
             return p;
         }
         function planReadOnly() { return BF_BOOTSTRAP.sharing && BF_BOOTSTRAP.sharing.readOnly; }
-        function planBillRemaining(b) {
+        function planBillRemaining(b, st) {
             // Plan against the MONTHLY payment amount (b.amount). For debt/payoff
             // bills that is the monthly instalment — not the whole payoff balance.
-            return b.status === 'paid' ? 0 : (b.amount || 0);
+            // st is the status of the occurrence being planned: scheduled future
+            // occurrences of a recurring bill still owe their monthly amount.
+            return (st || b.status) === 'paid' ? 0 : (b.amount || 0);
         }
         function planBillBalance(b) { return Math.max(0, (b.totalOwed || 0) - (b.paidAmount || 0)); }
-        function planBillOwes(b) { return planBillRemaining(b) > 0 && (b.status === 'pending' || b.status === 'overdue'); }
+        function planBillOwes(b, st) {
+            st = st || b.status;
+            return planBillRemaining(b, st) > 0 && (st === 'pending' || st === 'overdue' || st === 'scheduled');
+        }
         function planClaimedElsewhere(billId, activeId) {
             const key = String(billId);
             return plansGet().some(pl => pl.id !== activeId && pl.allocations && Object.prototype.hasOwnProperty.call(pl.allocations, key));
@@ -2638,12 +2708,18 @@
         function planWindowBills() {
             const p = planActive();
             const cutoff = planWindowEnd();
-            return bills.filter(b => b.dueDate && b.dueDate <= cutoff && planBillOwes(b) && !planClaimedElsewhere(b.id, p.id)).sort((x, y) => {
-                const ox = x.status === 'overdue' ? 0 : 1, oy = y.status === 'overdue' ? 0 : 1;
-                if (ox !== oy) return ox - oy;
-                if (x.dueDate !== y.dueDate) return x.dueDate < y.dueDate ? -1 : 1;
-                return (x.amount || 0) - (y.amount || 0);
-            });
+            // Each entry is one occurrence: { b: bill, occ: { date, st } }.
+            // Scheduled future occurrences of recurring bills are included so
+            // they can be planned ahead with this paycheck.
+            return bills
+                .map(b => ({ b: b, occ: planOccurrence(b) }))
+                .filter(r => r.occ.date && r.occ.date <= cutoff && planBillOwes(r.b, r.occ.st) && !planClaimedElsewhere(r.b.id, p.id))
+                .sort((x, y) => {
+                    const ox = x.occ.st === 'overdue' ? 0 : 1, oy = y.occ.st === 'overdue' ? 0 : 1;
+                    if (ox !== oy) return ox - oy;
+                    if (x.occ.date !== y.occ.date) return x.occ.date < y.occ.date ? -1 : 1;
+                    return (x.b.amount || 0) - (y.b.amount || 0);
+                });
         }
         function planAmountChanged() { const p = planActive(); p.amount = parseFloat(document.getElementById('planAmount').value) || 0; saveData(); planRenderTabs(); planRenderLists(); }
         function planDateChanged() { const p = planActive(); p.date = document.getElementById('planDate').value || ''; saveData(); planRenderTabs(); planRenderLists(); }
@@ -2655,10 +2731,10 @@
             if (!p.date) { showToast('Pick this paycheck\'s date first.', 'error'); return; }
             p.allocations = {};
             let left = p.amount;
-            planWindowBills().forEach(b => {
-                const owed = planBillRemaining(b);
+            planWindowBills().forEach(r => {
+                const owed = planBillRemaining(r.b, r.occ.st);
                 const give = Math.min(left, owed);
-                if (give > 0.005) { p.allocations[String(b.id)] = Math.round(give * 100) / 100; left = Math.round((left - give) * 100) / 100; }
+                if (give > 0.005) { p.allocations[String(r.b.id)] = Math.round(give * 100) / 100; left = Math.round((left - give) * 100) / 100; }
             });
             saveData(); planRenderTabs(); planRenderLists();
             const waited = planWindowBills().length - Object.keys(p.allocations).length;
@@ -2672,7 +2748,7 @@
         function planSetAlloc(billId, value) {
             if (planReadOnly()) { showToast('👁️ View-only access.', 'info'); return; }
             const p = planActive(); const b = bills.find(x => x.id === billId); if (!b) return;
-            const max = planBillRemaining(b);
+            const max = planBillRemaining(b, planOccurrence(b).st);
             let amt = parseFloat(value) || 0;
             if (amt < 0) amt = 0;
             if (amt > max) amt = max;
@@ -2683,7 +2759,7 @@
         function planAllocateFull(billId) {
             if (planReadOnly()) { showToast('👁️ View-only access.', 'info'); return; }
             const b = bills.find(x => x.id === billId); if (!b) return;
-            planActive().allocations[String(billId)] = planBillRemaining(b);
+            planActive().allocations[String(billId)] = planBillRemaining(b, planOccurrence(b).st);
             saveData(); planRenderTabs(); planRenderLists();
         }
         function planAdd() {
@@ -2742,10 +2818,11 @@
             const payRows = Object.keys(p.allocations).map(id => {
                 const b = bills.find(x => x.id === parseInt(id));
                 if (!b) return null;
-                const owed = planBillRemaining(b);
-                return { b: b, owed: owed, alloc: Math.min(parseFloat(p.allocations[id]) || 0, owed) };
-            }).filter(Boolean).sort((a, b2) => (a.b.dueDate < b2.b.dueDate ? -1 : 1));
-            const waitRows = planWindowBills().filter(b => p.allocations[String(b.id)] === undefined).map(b => ({ b: b, owed: planBillRemaining(b) }));
+                const occ = planOccurrence(b);
+                const owed = planBillRemaining(b, occ.st);
+                return { b: b, st: occ.st, date: occ.date, owed: owed, alloc: Math.min(parseFloat(p.allocations[id]) || 0, owed) };
+            }).filter(Boolean).sort((a, b2) => ((a.date || a.b.dueDate) < (b2.date || b2.b.dueDate) ? -1 : 1));
+            const waitRows = planWindowBills().filter(r => p.allocations[String(r.b.id)] === undefined).map(r => ({ b: r.b, st: r.occ.st, date: r.occ.date, owed: planBillRemaining(r.b, r.occ.st) }));
             const waitingTotal = waitRows.reduce((s, r) => s + r.owed, 0);
             document.getElementById('planAllocated').textContent = formatCurrency(totalAlloc);
             document.getElementById('planLeftover').textContent = formatCurrency(leftover);
@@ -2760,14 +2837,15 @@
                 covEl.innerHTML = `📅 Coverage currently ends <b>${formatDate(end)}</b> — set the <b>next paycheck date</b> above to include bills due through that day.`;
             }
             const balInfo = b => b.isPayoff ? ` · balance ${formatCurrency(planBillBalance(b))} left` : '';
-            const overdueTag = b => b.status === 'overdue' ? ` · <span style='color:var(--accent-amber);'>overdue</span>` : '';
+            const overdueTag = r => r.st === 'overdue' ? ` · <span style='color:var(--accent-amber);'>overdue</span>` : '';
+            const schedTag = r => r.st === 'scheduled' ? ` · <span style='color:var(--accent-blue);'>scheduled</span>` : '';
             const payEl = document.getElementById('planPayList');
             payEl.innerHTML = payRows.length ? payRows.map(r => {
                 const partial = r.alloc < r.owed - 0.005;
-                return `<div class="setting-row" style="align-items:center;"><div class="setting-info"><h4 style="font-size:14px;">${bfEscapeHtml(r.b.name)} <span style="color:var(--text-muted);font-weight:400;">· due ${formatDate(r.b.dueDate)}${overdueTag(r.b)}</span></h4><p>Monthly payment ${formatCurrency(r.owed)}${balInfo(r.b)}${partial ? ` — <b style='color:var(--accent-amber);'>partial: ${formatCurrency(Math.max(0, r.owed - r.alloc))} of this month's payment still unplanned</b>` : ' — fully covered'}</p></div><div style="display:flex;gap:8px;align-items:center;"><input type="number" class="form-input" style="width:110px;" min="0" step="0.01" max="${r.owed}" value="${r.alloc}" onchange="planSetAlloc(${r.b.id}, this.value)"><button class="btn btn-secondary btn-sm" title="Wait until another paycheck" onclick="planSetAlloc(${r.b.id}, 0)"><i class="fas fa-xmark"></i></button></div></div>`;
+                return `<div class="setting-row" style="align-items:center;"><div class="setting-info"><h4 style="font-size:14px;">${bfEscapeHtml(r.b.name)} <span style="color:var(--text-muted);font-weight:400;">· due ${formatDate(r.date || r.b.dueDate)}${overdueTag(r)}${schedTag(r)}</span></h4><p>Monthly payment ${formatCurrency(r.owed)}${balInfo(r.b)}${partial ? ` — <b style='color:var(--accent-amber);'>partial: ${formatCurrency(Math.max(0, r.owed - r.alloc))} of this month's payment still unplanned</b>` : ' — fully covered'}</p></div><div style="display:flex;gap:8px;align-items:center;"><input type="number" class="form-input" style="width:110px;" min="0" step="0.01" max="${r.owed}" value="${r.alloc}" onchange="planSetAlloc(${r.b.id}, this.value)"><button class="btn btn-secondary btn-sm" title="Wait until another paycheck" onclick="planSetAlloc(${r.b.id}, 0)"><i class="fas fa-xmark"></i></button></div></div>`;
             }).join('') : '<p style="color:var(--text-muted);font-size:13px;">Nothing planned yet — press <b>Auto plan</b> above, or add bills from the wait list below.</p>';
             const waitEl = document.getElementById('planWaitList');
-            waitEl.innerHTML = waitRows.length ? waitRows.map(r => `<div class="setting-row" style="align-items:center;"><div class="setting-info"><h4 style="font-size:14px;">${bfEscapeHtml(r.b.name)} <span style="color:var(--text-muted);font-weight:400;">· due ${formatDate(r.b.dueDate)}${overdueTag(r.b)}</span></h4><p>Monthly payment ${formatCurrency(r.owed)}${balInfo(r.b)}</p></div><button class="btn btn-secondary btn-sm" onclick="planAllocateFull(${r.b.id})"><i class="fas fa-plus"></i> Pay with this paycheck</button></div>`).join('') : '<p style="color:var(--text-muted);font-size:13px;">Every bill due by this paycheck is either covered here or planned on another paycheck.</p>';
+            waitEl.innerHTML = waitRows.length ? waitRows.map(r => `<div class="setting-row" style="align-items:center;"><div class="setting-info"><h4 style="font-size:14px;">${bfEscapeHtml(r.b.name)} <span style="color:var(--text-muted);font-weight:400;">· due ${formatDate(r.date || r.b.dueDate)}${overdueTag(r)}${schedTag(r)}</span></h4><p>Monthly payment ${formatCurrency(r.owed)}${balInfo(r.b)}</p></div><button class="btn btn-secondary btn-sm" onclick="planAllocateFull(${r.b.id})"><i class="fas fa-plus"></i> Pay with this paycheck</button></div>`).join('') : '<p style="color:var(--text-muted);font-size:13px;">Every bill due by this paycheck is either covered here or planned on another paycheck.</p>';
             const cutoff = p.date || new Date().toISOString().slice(0, 10);
             const next = bills.filter(b => b.dueDate && b.dueDate > cutoff && planBillOwes(b) && !planClaimedElsewhere(b.id, p.id) && p.allocations[String(b.id)] === undefined).sort((a, b2) => (a.dueDate < b2.dueDate ? -1 : 1)).slice(0, 8);
             const nextEl = document.getElementById('planNextList');
