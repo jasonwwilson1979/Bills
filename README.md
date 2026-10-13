@@ -61,6 +61,10 @@ Notes:
   account like any other change.
 - First sign-in seeds the same sample bills the original app used, so you can
   explore immediately; "Clear Data" in Settings empties your account.
+- **Backup & Restore** in Settings downloads your entire page (bills, accounts,
+  budgets, paycheck plans, custom categories and the app name) as a
+  `billflow_backup_YYYY-MM-DD.json` file, and can restore it later — handy after
+  clearing data, moving devices, or starting a fresh account.
 
 ## Deploying to an Ubuntu server
 

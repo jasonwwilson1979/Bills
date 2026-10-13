@@ -89,6 +89,62 @@ class AppPageTests(TestCase):
         self.assertIn('Jason', body)         # sidebar shows the display name
         self.assertIn('Sign out', body)
 
+    def test_app_page_shows_backup_and_restore_ui(self):
+        self.client.force_login(self.user)
+        r = self.client.get('/')
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('Backup &amp; Restore', body)          # settings section title
+        self.assertIn('Download Backup', body)
+        self.assertIn('Restore Backup', body)
+        self.assertIn('backupData()', body)
+        self.assertIn('openRestoreModal()', body)
+        self.assertIn('id="restoreModal"', body)
+        self.assertIn('id="restoreFileInput"', body)
+        self.assertIn('accept=".json,application/json"', body)
+
+    def test_backup_document_roundtrips_through_state_api(self):
+        """A backup file as built by backupData()/restore must survive the
+        clear -> restore cycle through the validated state API."""
+        self.client.force_login(self.user)
+        full = {
+            'appName': 'House Bills',
+            'budgets': {'housing': 1500, 'debt': 400},
+            'bills': [{'id': 1, 'name': 'Rent', 'amount': 1200, 'dueDate': '2026-11-01',
+                       'category': 'housing', 'status': 'pending', 'recurring': True,
+                       'isPayoff': True, 'totalOwed': 2400, 'paidAmount': 600,
+                       'payments': [{'date': '2026-10-01', 'amount': 600, 'note': 'x', 'accountId': 1}],
+                       'interestRate': 3.5, 'interestRateType': 'annual', 'notes': 'n',
+                       'preferredAccountId': 1}],
+            'accounts': [{'id': 1, 'name': 'Checking', 'type': 'checking', 'balance': 900, 'color': 'blue'}],
+            'paycheckPlans': [{'id': 5, 'amount': 2000, 'date': '2026-10-15', 'nextDate': '2026-10-30',
+                               'allocations': {'1': 1200}}],
+            'customCategories': {'pets': {'label': 'Pets', 'icon': 'fa-paw', 'color': 'pink'}},
+        }
+        # Exactly the shape backupData() downloads: versioned wrapper + data doc
+        backup = {'bfVersion': 1, 'app': 'BillFlow',
+                  'exportedAt': '2026-10-13T12:00:00.000Z', 'data': dict(full)}
+        r = self.client.put('/api/state/', data=json.dumps(full), content_type='application/json')
+        self.assertEqual(r.status_code, 200)
+
+        # Simulate "Clear Data", then restore from the backup file
+        self.client.put('/api/state/', data=json.dumps(
+            {'appName': 'BillFlow', 'budgets': {}, 'bills': [], 'accounts': []}),
+            content_type='application/json')
+        r2 = self.client.put('/api/state/', data=json.dumps(backup['data']), content_type='application/json')
+        self.assertEqual(r2.status_code, 200)
+        self.assertTrue(r2.json()['ok'])
+
+        r3 = self.client.get('/api/state/')
+        self.assertEqual(r3.status_code, 200)
+        doc = r3.json()['data']
+        self.assertEqual(doc['appName'], 'House Bills')
+        self.assertEqual(doc['bills'][0]['name'], 'Rent')
+        self.assertEqual(doc['bills'][0]['paidAmount'], 600)
+        self.assertEqual(doc['accounts'][0]['balance'], 900)
+        self.assertEqual(doc['paycheckPlans'][0]['allocations'], {'1': 1200})
+        self.assertEqual(doc['customCategories']['pets']['label'], 'Pets')
+
     def test_api_state_requires_auth(self):
         r = self.client.put('/api/state/', data='{}', content_type='application/json')
         self.assertEqual(r.status_code, 302)

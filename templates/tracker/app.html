@@ -864,6 +864,10 @@
                         <div class="setting-row"><div class="setting-info"><h4>Export Data</h4><p>Download all your bill data as CSV</p></div><button class="btn btn-secondary btn-sm" onclick="exportData()"><i class="fas fa-download"></i> Export CSV</button></div>
                         <div class="setting-row"><div class="setting-info"><h4>Clear All Data</h4><p>Permanently delete all bills, accounts & settings</p></div><button class="btn btn-danger btn-sm" onclick="clearAllData()"><i class="fas fa-trash"></i> Clear Data</button></div>
                     </div>
+                    <div class="settings-section"><h3 class="settings-section-title">Backup &amp; Restore</h3>
+                        <div class="setting-row"><div class="setting-info"><h4>Backup All Data</h4><p>Download everything — bills, accounts, budgets, paycheck plans, categories & app name — as a JSON backup file</p></div><button class="btn btn-secondary btn-sm" onclick="backupData()"><i class="fas fa-cloud-arrow-down"></i> Download Backup</button></div>
+                        <div class="setting-row"><div class="setting-info"><h4>Restore from Backup</h4><p>Replace all current data with a backup file you downloaded earlier (e.g. after clearing data or moving devices)</p></div><button class="btn btn-secondary btn-sm" onclick="openRestoreModal()"><i class="fas fa-cloud-arrow-up"></i> Restore Backup</button></div>
+                    </div>
                 </div></div>
             </div>
         </main>
@@ -1154,6 +1158,33 @@
                 <div class="import-preview-table-wrap"><table class="import-preview-table" id="importPreviewTable"></table></div>
             </div>
             <div class="modal-footer"><button class="btn btn-secondary" onclick="closeImportPreviewModal()">Back</button><button class="btn btn-primary" onclick="confirmImport()"><i class="fas fa-download"></i> Import Bills</button></div>
+        </div>
+    </div>
+
+    <!-- RESTORE BACKUP MODAL -->
+    <div class="modal-overlay" id="restoreModal">
+        <div class="modal" style="width:520px;">
+            <div class="modal-header"><h3 class="modal-title"><i class="fas fa-cloud-arrow-up" style="color:var(--accent-blue);margin-right:8px;"></i>Restore from Backup</h3><button class="modal-close" onclick="closeRestoreModal()"><i class="fas fa-times"></i></button></div>
+            <div class="modal-body">
+                <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">Choose a <strong>billflow_backup_*.json</strong> file. Restoring replaces <strong>all</strong> current data on this page with the contents of the backup.</p>
+                <div id="restoreDropZone" class="import-dropzone" onclick="document.getElementById('restoreFileInput').click();">
+                    <i class="fas fa-file-arrow-up" style="font-size:32px;color:var(--accent-blue);margin-bottom:10px;display:block;"></i>
+                    <div style="font-size:13px;font-weight:600;">Click to choose a backup file</div>
+                    <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">or drag &amp; drop it here</div>
+                    <input type="file" id="restoreFileInput" accept=".json,application/json" style="display:none;" onchange="handleRestoreFileSelect(this.files);">
+                </div>
+                <div id="restoreFileBanner" class="import-file-banner" style="display:none;">
+                    <i class="fas fa-file-code" style="color:var(--accent-blue);"></i>
+                    <div class="import-file-info">
+                        <div class="import-file-name" id="restoreFileName"></div>
+                        <div class="import-file-size" id="restoreFileInfo"></div>
+                    </div>
+                    <button class="import-file-remove" onclick="clearRestoreFile(event)"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="import-summary" id="restorePreview" style="display:none;"></div>
+                <div id="restoreError" style="display:none;margin-top:12px;padding:12px;border-radius:var(--radius-md);background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.35);color:#f87171;font-size:13px;font-weight:600;"></div>
+            </div>
+            <div class="modal-footer"><button class="btn btn-secondary" onclick="closeRestoreModal()">Cancel</button><button class="btn btn-danger" id="restoreConfirmBtn" onclick="confirmRestore()" disabled><i class="fas fa-rotate-left"></i> Restore Data</button></div>
         </div>
     </div>
 
@@ -2206,6 +2237,145 @@
             a.href=url;a.download=`billflow_${new Date().toISOString().split('T')[0]}.csv`;a.click();URL.revokeObjectURL(url);showToast('Exported!','success');
         }
         function clearAllData() { if(confirm('Delete ALL data permanently?')){bills=[];accounts=[];selectedBillIds.clear();savingsSelectedIds.clear();if(bfState){bfState.paycheckPlans=[];bfState.activePaycheckPlanId=null;bfState.customCategories={};}saveData();refreshCustomCategories();refreshCategoryOptions();renderCustomCatsList();renderAll();setAppName('BillFlow');showToast('All data cleared.','info');} }
+
+        // ============ BACKUP & RESTORE (full JSON snapshot) ============
+        const BF_BACKUP_VERSION = 1;
+        const BF_MAX_BACKUP_BYTES = 5 * 1024 * 1024; // matches the server's MAX_STATE_BYTES
+        let restorePayload = null;
+
+        function backupData() {
+            ensureState();
+            const payload = {
+                bfVersion: BF_BACKUP_VERSION,
+                app: 'BillFlow',
+                exportedAt: new Date().toISOString(),
+                data: {
+                    appName: getAppName(),
+                    budgets: getBudgets(),
+                    bills: bills,
+                    accounts: accounts,
+                    paycheckPlans: bfState.paycheckPlans || [],
+                    activePaycheckPlanId: bfState.activePaycheckPlanId || null,
+                    customCategories: bfState.customCategories || {},
+                },
+            };
+            const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `billflow_backup_${new Date().toISOString().split('T')[0]}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast('Backup downloaded — keep the file somewhere safe.', 'success');
+        }
+
+        function openRestoreModal() { resetRestoreState(); document.getElementById('restoreModal').classList.add('active'); }
+        function closeRestoreModal() { document.getElementById('restoreModal').classList.remove('active'); resetRestoreState(); }
+        function resetRestoreState() {
+            restorePayload = null;
+            document.getElementById('restoreFileInput').value = '';
+            document.getElementById('restoreFileBanner').style.display = 'none';
+            document.getElementById('restorePreview').style.display = 'none';
+            document.getElementById('restoreError').style.display = 'none';
+            document.getElementById('restoreConfirmBtn').disabled = true;
+        }
+        function clearRestoreFile(e) {
+            if (e) e.stopPropagation();
+            resetRestoreState();
+            showToast('Backup file removed.', 'info');
+        }
+        function showRestoreError(msg) {
+            const el = document.getElementById('restoreError');
+            el.textContent = '⚠️ ' + msg;
+            el.style.display = 'block';
+        }
+
+        function handleRestoreFileSelect(fileList) {
+            const file = fileList && fileList[0];
+            if (!file) return;
+            if (file.size > BF_MAX_BACKUP_BYTES) { showRestoreError('That file is too large (max 5 MB).'); return; }
+            const reader = new FileReader();
+            reader.onload = e => {
+                try { acceptRestoreFile(file, String(e.target.result)); }
+                catch (err) {
+                    restorePayload = null;
+                    document.getElementById('restoreFileBanner').style.display = 'none';
+                    document.getElementById('restorePreview').style.display = 'none';
+                    document.getElementById('restoreConfirmBtn').disabled = true;
+                    showRestoreError(err.message || 'Could not read that file.');
+                }
+            };
+            reader.onerror = () => showRestoreError('Could not read that file.');
+            reader.readAsText(file);
+        }
+
+        function acceptRestoreFile(file, text) {
+            let parsed;
+            try { parsed = JSON.parse(text); }
+            catch (err) { throw new Error('That file is not valid JSON.'); }
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Backup must be a JSON object.');
+            if (parsed.bfVersion !== undefined && parsed.bfVersion > BF_BACKUP_VERSION) throw new Error('This backup was made by a newer version of BillFlow.');
+            // Accept our native format ({bfVersion, data:{...}}) or a raw state document.
+            const doc = (parsed.data && typeof parsed.data === 'object' && !Array.isArray(parsed.data)) ? parsed.data : parsed;
+            if (!Array.isArray(doc.bills) || !Array.isArray(doc.accounts)) throw new Error('That file is not a BillFlow backup (bills/accounts missing).');
+            if (doc.bills.length > 5000) throw new Error('Backup holds too many bills (max 5,000).');
+            if (doc.accounts.length > 200) throw new Error('Backup holds too many accounts (max 200).');
+            restorePayload = normalizeBackupDoc(doc);
+
+            document.getElementById('restoreError').style.display = 'none';
+            document.getElementById('restoreFileName').textContent = file.name;
+            const when = parsed.exportedAt ? new Date(parsed.exportedAt) : null;
+            document.getElementById('restoreFileInfo').textContent = (file.size / 1024).toFixed(1) + ' KB' + (when && !isNaN(when.getTime()) ? ' · backed up ' + when.toLocaleString() : '');
+            document.getElementById('restoreFileBanner').style.display = 'flex';
+            const p = restorePayload;
+            document.getElementById('restorePreview').innerHTML =
+                '<div class="import-summary-item"><div class="value">' + p.bills.length + '</div><div class="label">Bills</div></div>' +
+                '<div class="import-summary-item"><div class="value">' + p.accounts.length + '</div><div class="label">Accounts</div></div>' +
+                '<div class="import-summary-item"><div class="value">' + p.paycheckPlans.length + '</div><div class="label">Paychecks</div></div>' +
+                '<div class="import-summary-item"><div class="value">' + Object.keys(p.customCategories).length + '</div><div class="label">Categories</div></div>';
+            document.getElementById('restorePreview').style.display = 'flex';
+            document.getElementById('restoreConfirmBtn').disabled = false;
+        }
+
+        function normalizeBackupDoc(doc) {
+            const plans = Array.isArray(doc.paycheckPlans) ? doc.paycheckPlans : [];
+            return {
+                appName: (typeof doc.appName === 'string' && doc.appName.trim()) ? doc.appName.trim().slice(0, 60) : 'BillFlow',
+                budgets: (doc.budgets && typeof doc.budgets === 'object' && !Array.isArray(doc.budgets) && Object.keys(doc.budgets).length) ? doc.budgets : { ...BF_DEFAULT_BUDGETS },
+                bills: doc.bills.map(x => ({ ...x, isPayoff: x.isPayoff || false, totalOwed: x.totalOwed || 0, paidAmount: x.paidAmount || 0, payments: x.payments || [], interestRate: x.interestRate || 0, interestRateType: x.interestRateType || 'annual', preferredAccountId: x.preferredAccountId || null })),
+                accounts: doc.accounts,
+                paycheckPlans: plans,
+                activePaycheckPlanId: doc.activePaycheckPlanId || (plans.length ? plans[0].id : null),
+                customCategories: (doc.customCategories && typeof doc.customCategories === 'object' && !Array.isArray(doc.customCategories)) ? doc.customCategories : {},
+            };
+        }
+
+        function confirmRestore() {
+            if (!restorePayload) { showToast('Choose a valid backup file first.', 'error'); return; }
+            if (viewOnlyMode()) { showToast('👁️ View-only access — you cannot restore data on a shared page.', 'error'); return; }
+            const p = restorePayload;
+            bills = p.bills;
+            accounts = p.accounts;
+            ensureState();
+            bfState.appName = p.appName;
+            bfState.budgets = p.budgets;
+            bfState.bills = bills;
+            bfState.accounts = accounts;
+            bfState.paycheckPlans = p.paycheckPlans;
+            bfState.activePaycheckPlanId = p.activePaycheckPlanId;
+            bfState.customCategories = p.customCategories;
+            selectedBillIds.clear();
+            savingsSelectedIds.clear();
+            setAppName(p.appName);
+            document.getElementById('appNameInput').value = p.appName === 'BillFlow' ? '' : p.appName;
+            refreshCustomCategories();
+            refreshCategoryOptions();
+            renderCustomCatsList();
+            renderAll();
+            saveData();
+            closeRestoreModal();
+            showToast(`Backup restored — ${p.bills.length} bill${p.bills.length === 1 ? '' : 's'} and ${p.accounts.length} account${p.accounts.length === 1 ? '' : 's'} are back.`, 'success');
+        }
 
         // ============ PAYCHECK PLAN (multiple plans) ============
         function plansGet() {
@@ -3291,7 +3461,7 @@
         document.getElementById('bankImportModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeBankImportModal();});
         document.getElementById('setBalanceModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeSetBalanceModal();});
         document.getElementById('budgetEditModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeBudgetEditModal();});
-        document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();closePaymentModal();closeBulkPaymentModal();closeAccountModal();closeUnpayModal();closeBudgetEditModal();closeDepositModal();closeBankImportModal();closeSetBalanceModal();closeImportPreviewModal();closeImportModal();}if(e.key==='n'&&e.ctrlKey){e.preventDefault();openModal();}});
+        document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();closePaymentModal();closeBulkPaymentModal();closeAccountModal();closeUnpayModal();closeBudgetEditModal();closeDepositModal();closeBankImportModal();closeSetBalanceModal();closeImportPreviewModal();closeImportModal();closeRestoreModal();}if(e.key==='n'&&e.ctrlKey){e.preventDefault();openModal();}});
 
         // ============================================================
         // SERVER-SYNCED STATE (replaces the old localStorage store)
@@ -3717,7 +3887,7 @@
             URL.revokeObjectURL(url);
         }
 
-        // Wire up drag & drop + click-outside for the import modals
+        // Wire up drag & drop + click-outside for the import & restore modals
         (function wireImportUI() {
             const dz = document.getElementById('importDropZone');
             if (dz) {
@@ -3729,6 +3899,14 @@
             if (im) im.addEventListener('click', e => { if (e.target === e.currentTarget) closeImportModal(); });
             const ipm = document.getElementById('importPreviewModal');
             if (ipm) ipm.addEventListener('click', e => { if (e.target === e.currentTarget) closeImportPreviewModal(); });
+            const rdz = document.getElementById('restoreDropZone');
+            if (rdz) {
+                ['dragenter', 'dragover'].forEach(ev => rdz.addEventListener(ev, e => { e.preventDefault(); rdz.classList.add('dragover'); }));
+                ['dragleave', 'drop'].forEach(ev => rdz.addEventListener(ev, e => { e.preventDefault(); rdz.classList.remove('dragover'); }));
+                rdz.addEventListener('drop', e => { if (e.dataTransfer && e.dataTransfer.files.length) handleRestoreFileSelect(e.dataTransfer.files); });
+            }
+            const rm = document.getElementById('restoreModal');
+            if (rm) rm.addEventListener('click', e => { if (e.target === e.currentTarget) closeRestoreModal(); });
         })();
 
         // Load saved theme on startup
