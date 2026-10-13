@@ -2601,13 +2601,14 @@
             return out;
         }
         function bankDetectFinalBalance(rows) {
-            // The bank's own running balance is the truth: figure out whether the
-            // file is oldest-first or newest-first by checking which order makes
-            // balance[i] = balance[i-1] - debit[i] + credit[i] hold, then take the
-            // chronologically LAST row's balance.
+            // The bank's own running balance is the truth. Detect (a) whether the
+            // file is oldest-first or newest-first and (b) whether the Debit /
+            // Credit columns follow the usual convention (debit = money out) —
+            // by testing which combination makes
+            // balance[i] = balance[i-1] - debit[i] + credit[i] hold best.
             const bal = rows.filter(r => r.balance !== null);
             if (!bal.length) return null;
-            if (bal.length === 1) { bankImportData.finalBalanceDate = bal[0].date; return bal[0].balance; }
+            if (bal.length === 1) { bankImportData.finalBalanceDate = bal[0].date; bankImportData.normalizedRows = rows.slice(); return bal[0].balance; }
             const score = (seq) => {
                 let ok = 0, total = 0;
                 for (let i = 1; i < seq.length; i++) {
@@ -2617,8 +2618,21 @@
                 }
                 return total ? ok / total : -1;
             };
-            let seq = rows;
-            if (score(rows.slice().reverse()) > score(rows)) seq = rows.slice().reverse();
+            let best = null, bestScore = -1, bestSwap = false;
+            [{ rev: false, swap: false }, { rev: true, swap: false }, { rev: false, swap: true }, { rev: true, swap: true }].forEach(v => {
+                let seq = rows.map(r => (v.swap ? { date: r.date, note: r.note, desc: r.desc, debit: r.credit, credit: r.debit, balance: r.balance } : r));
+                if (v.rev) seq = seq.slice().reverse();
+                const s = score(seq);
+                if (s > bestScore) { bestScore = s; best = seq; bestSwap = v.swap; }
+            });
+            let seq;
+            if (bestScore > 0) {
+                seq = best;
+            } else {
+                // Balance column doesn't reconcile — keep date order, no swap
+                seq = rows.slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+            }
+            bankImportData.normalizedRows = seq;
             const chosen = seq.filter(r => r.balance !== null);
             const last = chosen[chosen.length - 1];
             bankImportData.finalBalanceDate = last.date;
@@ -2626,10 +2640,10 @@
         }
         function bankUpdatePreview() {
             const rowsFile = buildBankRows();
-            const rows = rowsFile.slice().sort((a, b) => (a.date < b.date ? -1 : 1));
-            const inT = rows.reduce((s, r) => s + r.credit, 0), outT = rows.reduce((s, r) => s + r.debit, 0);
             bankImportData.finalBalanceDate = '';
             bankImportData.finalBalance = bankDetectFinalBalance(rowsFile);
+            const rows = (bankImportData.normalizedRows || rowsFile).slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+            const inT = rows.reduce((s, r) => s + r.credit, 0), outT = rows.reduce((s, r) => s + r.debit, 0);
             const autoLink = rows.filter(r => { const mk = descMatchKey(r.desc || r.note); return mk && bills.some(b => b.recurring && b.matchKey === mk); });
             const span = rows.length ? `${formatDate(rows[0].date)} → ${formatDate(rows[rows.length - 1].date)}` : '—';
             const cell = 'text-align:center;padding:10px;background:var(--bg-input);border-radius:var(--radius-sm);';
@@ -2645,7 +2659,7 @@
         function applyBankImport() {
             if (viewOnlyMode()) { showToast('👁️ View-only access.', 'info'); return; }
             const acc = accounts.find(a => a.id === bankImportAccId); if (!acc || !bankImportData) return;
-            const rows = buildBankRows().sort((a, b) => (a.date < b.date ? -1 : 1));
+            const rows = (bankImportData.normalizedRows || buildBankRows()).slice().sort((a, b) => (a.date < b.date ? -1 : 1));
             if (!rows.length) { showToast('Nothing to import — check the column mapping.', 'error'); return; }
             const dup = (list, r, amt) => (list || []).some(x => x.date === r.date && Math.abs((x.amount || 0) - amt) < 0.005 && (x.note || '') === r.note);
             const billMatch = r => bills.some(b => (b.payments || []).some(p => p.accountId === acc.id && p.date === r.date && Math.abs((p.amount || 0) - r.debit) < 0.005));
