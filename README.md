@@ -219,6 +219,10 @@ Open **Settings → Sharing** to give other Google accounts access to your page:
   address you invited. If they sign in with a different account, they'll only
   see their own page; remove the old invite in Settings → Sharing and invite
   the correct address.
+- **Fully responsive on phones** — bill rows reflow to two lines, inputs use
+  16px text so iOS Safari doesn't zoom on focus, modals become near-full-width
+  sheets, summaries and tab rows wrap, and wide tables scroll instead of
+  crushing. The desktop layout is untouched.
 - **Remove** takes their access away at any time. Pending invites are listed
   alongside active members and can be removed the same way.
 

@@ -555,6 +555,21 @@ class TemplateScriptTests(TestCase):
         self.assertLess(idx_none, idx_media,
                         'hide rule must come before the media query it overrides')
 
+    def test_mobile_layout_rules_exist(self):
+        """Guard the phone refinements: iOS-zoom-proof inputs, the two-line
+        bill row, and stat grids that beat their inline styles."""
+        from django.conf import settings
+
+        path = os.path.join(str(settings.BASE_DIR), 'templates', 'tracker', 'app.html')
+        with open(path, encoding='utf-8') as fh:
+            html = fh.read()
+        for needle in ('===== MOBILE REFINEMENTS',
+                       '.form-input, .form-select { font-size: 16px',
+                       '.bill-row .bill-actions { grid-column: 1 / -1',
+                       'grid-template-columns: 1fr 1fr !important',
+                       '.modal { max-width: calc(100vw - 16px)'):
+            self.assertIn(needle, html)
+
     def test_month_view_supports_scheduled_occurrences(self):
         """Future months of recurring bills must read 'scheduled' (derived
         per-occurrence status) instead of the global 'paid' status, and those
