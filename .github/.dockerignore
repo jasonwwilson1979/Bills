@@ -1,9 +1,0 @@
-__pycache__/
-*.pyc
-db.sqlite3
-secret_key
-.git/
-.gitignore
-staticfiles/
-.env
-README.md

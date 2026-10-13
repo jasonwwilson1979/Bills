@@ -603,6 +603,24 @@ class TemplateScriptTests(TestCase):
                        'window.scrollTo(0, 0)'):
             self.assertIn(needle, html)
 
+    def test_category_drill_down_exists(self):
+        """Budget & Reports category rows open a drill-down listing the
+        bills in that category (with edit + jump-to-All-Bills actions)."""
+        from django.conf import settings
+
+        path = os.path.join(str(settings.BASE_DIR), 'templates', 'tracker', 'app.html')
+        with open(path, encoding='utf-8') as fh:
+            html = fh.read()
+        for needle in ('function openCategoryBills(', 'function closeCategoryBillsModal(',
+                       'function renderCategoryBillList(', 'function viewCategoryInBills(',
+                       'id="categoryBillsModal"', 'id="catBillsList"', 'id="catBillsSummary"',
+                       'onclick="openCategoryBills(this.dataset.cat)"',
+                       'data-cat="${bfEscapeHtml(cat)}"', 'catbill-row'):
+            self.assertIn(needle, html)
+        # All four category surfaces are clickable: budget allocation,
+        # budget legend, report breakdown, report legend.
+        self.assertEqual(html.count('onclick="openCategoryBills(this.dataset.cat)"'), 4)
+
 
 class TemplateStructureTests(TestCase):
     """Parses the *rendered* app page with html.parser (script bodies are

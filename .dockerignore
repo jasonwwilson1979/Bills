@@ -7,3 +7,7 @@ secret_key
 staticfiles/
 .env
 README.md
+vars.txt
+vars*.txt
+data/
+*.log

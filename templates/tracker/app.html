@@ -1323,6 +1323,18 @@
         </div>
     </div>
 
+    <!-- CATEGORY BILLS (DRILL-DOWN) MODAL -->
+    <div class="modal-overlay" id="categoryBillsModal">
+        <div class="modal" style="width:520px;">
+            <div class="modal-header"><h3 class="modal-title" id="catBillsTitle">Bills</h3><button class="modal-close" onclick="closeCategoryBillsModal()"><i class="fas fa-times"></i></button></div>
+            <div class="modal-body">
+                <div id="catBillsSummary"></div>
+                <div id="catBillsList" class="catbill-list"></div>
+            </div>
+            <div class="modal-footer"><button class="btn btn-secondary" onclick="closeCategoryBillsModal()">Close</button><button class="btn btn-primary" onclick="viewCategoryInBills()"><i class="fas fa-list"></i> View in All Bills</button></div>
+        </div>
+    </div>
+
     <!-- BULK PAY BAR -->
     <div class="bulk-pay-bar" id="bulkPayBar">
         <div class="bulk-pay-info"><div class="bulk-pay-count" id="bulkPayCount">0</div><span class="bulk-pay-text">bills selected</span></div>
@@ -1498,6 +1510,17 @@
         .chat-bill-chip:hover { background: rgba(59,130,246,0.4); }
         @keyframes bfRowFlash { 0%,55% { background: rgba(59,130,246,0.16); } 100% { background: transparent; } }
         .bill-row.flash { animation: bfRowFlash 1.8s ease; }
+        /* ===== CATEGORY DRILL-DOWN ===== */
+        .clickable { cursor: pointer; transition: var(--transition); }
+        .clickable:hover { background: var(--bg-card-hover); }
+        #catBillsSummary { padding: 10px 12px; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 10px; font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; }
+        .catbill-list { max-height: 400px; overflow-y: auto; }
+        .catbill-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; transition: var(--transition); }
+        .catbill-row:last-child { border-bottom: none; }
+        .catbill-row:hover { background: var(--bg-card); }
+        .catbill-row .bill-icon { width: 34px; height: 34px; font-size: 13px; }
+        .catbill-row h4 { font-size: 14px; font-weight: 600; }
+        .catbill-row p { font-size: 12px; color: var(--text-muted); }
         @media (max-width: 768px) { .chat-messages { height: 58vh; padding: 14px; } .chat-row { max-width: 85%; } .chat-tabs { padding: 12px 12px 0; } .chat-input-bar { padding: 12px; gap: 8px; } .chat-input { min-height: 42px; } }
     </style>
 
@@ -1897,7 +1920,7 @@
             document.getElementById('budgetDonutTotal').textContent=formatCurrency(tb);
             c.innerHTML=Object.entries(budgets).map(([cat,bud])=>{
                 const cfg=categoryConfig[cat]||categoryConfig.other,cs=spent[cat]||0,pct=Math.min((cs/bud)*100,100),over=cs>bud;
-                return `<div class="budget-item" style="flex-direction:column;align-items:stretch;gap:8px;padding:16px 0;">
+                return `<div class="budget-item clickable" data-cat="${bfEscapeHtml(cat)}" onclick="openCategoryBills(this.dataset.cat)" title="Show bills in this category" style="flex-direction:column;align-items:stretch;gap:8px;padding:16px 0;">
                     <div style="display:flex;justify-content:space-between;align-items:center;">
                         <div style="display:flex;align-items:center;gap:10px;"><div class="budget-color" style="background:${colorMap[cfg.color]}"></div><div class="budget-info"><h4>${cfg.label}</h4><p>${formatCurrency(cs)} of ${formatCurrency(bud)}</p></div></div>
                         <div class="budget-amount" style="color:${over?'var(--accent-red)':'var(--text-primary)'}">${over?'⚠️ ':''}${formatCurrency(bud-cs)} left</div>
@@ -1908,7 +1931,7 @@
             const svg=document.querySelector('#budgetDonut svg'),circ=2*Math.PI*60;let off=0,circs='';
             Object.entries(budgets).sort((a,b)=>b[1]-a[1]).forEach(([cat,amt])=>{const p=amt/tb,d=p*circ,col=colorMap[categoryConfig[cat]?.color]||'#64748b';circs+=`<circle cx="80" cy="80" r="60" stroke="${col}" stroke-dasharray="${d} ${circ-d}" stroke-dashoffset="${-off}" style="transition:all 0.8s ease;"/>`;off+=d;});
             svg.innerHTML=`<circle cx="80" cy="80" r="60" stroke="#2a3550" stroke-dasharray="377 377" opacity="0.3"/>`+circs;
-            document.getElementById('budgetLegend').innerHTML=Object.entries(budgets).sort((a,b)=>b[1]-a[1]).map(([cat,amt])=>{const cfg=categoryConfig[cat]||categoryConfig.other;return `<div class="budget-item"><div class="budget-color" style="background:${colorMap[cfg.color]}"></div><div class="budget-info"><h4>${cfg.label}</h4><p>${((amt/tb)*100).toFixed(1)}%</p></div><div class="budget-amount">${formatCurrency(amt)}</div></div>`;}).join('');
+            document.getElementById('budgetLegend').innerHTML=Object.entries(budgets).sort((a,b)=>b[1]-a[1]).map(([cat,amt])=>{const cfg=categoryConfig[cat]||categoryConfig.other;return `<div class="budget-item clickable" data-cat="${bfEscapeHtml(cat)}" onclick="openCategoryBills(this.dataset.cat)" title="Show bills in this category"><div class="budget-color" style="background:${colorMap[cfg.color]}"></div><div class="budget-info"><h4>${cfg.label}</h4><p>${((amt/tb)*100).toFixed(1)}%</p></div><div class="budget-amount">${formatCurrency(amt)}</div></div>`;}).join('');
         }
 
         function openBudgetEditModal() {
@@ -3005,6 +3028,51 @@
             }
         }
 
+        // ============ CATEGORY DRILL-DOWN (Budget & Reports) ============
+        let catBillsKey = null;
+
+        function openCategoryBills(key) {
+            if (!key) return;
+            catBillsKey = key;
+            renderCategoryBillList();
+            document.getElementById('categoryBillsModal').classList.add('active');
+        }
+        function closeCategoryBillsModal() { document.getElementById('categoryBillsModal').classList.remove('active'); }
+        function renderCategoryBillList() {
+            const cfg = categoryConfig[catBillsKey] || categoryConfig.other;
+            const list = bills.filter(b => b.category === catBillsKey)
+                              .sort((a, b) => ((a.dueDate || '') < (b.dueDate || '') ? -1 : 1));
+            const total = list.reduce((s, b) => s + b.amount, 0);
+            document.getElementById('catBillsTitle').innerHTML =
+                `<i class="fas ${cfg.icon}" style="color:${colorMap[cfg.color]};margin-right:8px;"></i>${bfEscapeHtml(cfg.label)}`;
+            document.getElementById('catBillsSummary').innerHTML =
+                `${list.length} bill${list.length === 1 ? '' : 's'} · <b>${formatCurrency(total)}</b> total monthly`;
+            const el = document.getElementById('catBillsList');
+            el.innerHTML = list.length ? list.map(b => {
+                const occ = planOccurrence(b);
+                const when = (occ && occ.date) || b.dueDate;
+                const stLabel = b.status.charAt(0).toUpperCase() + b.status.slice(1);
+                return `<div class="catbill-row" onclick="closeCategoryBillsModal();editBill(${b.id})" title="Edit this bill">
+                    <div class="bill-icon ${cfg.class}"><i class="fas ${cfg.icon}"></i></div>
+                    <div style="flex:1;min-width:0;">
+                        <h4>${bfEscapeHtml(b.name)}</h4>
+                        <p>${when ? 'due ' + formatDate(when) : ''}${b.notes ? ' · 📝 notes' : ''}</p>
+                    </div>
+                    <span class="bill-status ${b.status}"><span class="bill-status-dot"></span>${stLabel}</span>
+                    <div style="font-weight:700;white-space:nowrap;">${formatCurrency(b.amount)}</div>
+                </div>`;
+            }).join('') : '<p style="color:var(--text-muted);font-size:13px;padding:12px 0;">No bills in this category.</p>';
+        }
+        function viewCategoryInBills() {
+            const cfg = categoryConfig[catBillsKey] || categoryConfig.other;
+            closeCategoryBillsModal();
+            currentFilter = 'all';
+            document.getElementById('searchBills').value = catBillsKey;
+            switchPage('bills');
+            renderAllBills();
+            showToast(`Showing bills matching “${cfg.label}”.`, 'info');
+        }
+
         // ---- 1-on-1 chat picker ----
         function openChatPeopleModal() {
             const me = (BF_BOOTSTRAP.email || '').toLowerCase();
@@ -3749,7 +3817,7 @@
 
             document.getElementById('reportCategoryLegend').innerHTML = Object.entries(cats).sort((a, b) => b[1] - a[1]).map(([cat, amt]) => {
                 const cfg = categoryConfig[cat] || categoryConfig.other;
-                return `<div class="budget-item"><div class="budget-color" style="background:${colorMap[cfg.color]}"></div><div class="budget-info"><h4>${cfg.label}</h4><p>${((amt / total) * 100).toFixed(1)}%</p></div><div class="budget-amount">${formatCurrency(amt)}</div></div>`;
+                return `<div class="budget-item clickable" data-cat="${bfEscapeHtml(cat)}" onclick="openCategoryBills(this.dataset.cat)" title="Show bills in this category"><div class="budget-color" style="background:${colorMap[cfg.color]}"></div><div class="budget-info"><h4>${cfg.label}</h4><p>${((amt / total) * 100).toFixed(1)}%</p></div><div class="budget-amount">${formatCurrency(amt)}</div></div>`;
             }).join('');
 
             // Bar chart
@@ -3767,7 +3835,7 @@
             Object.entries(cats).sort((a, b) => b[1] - a[1]).forEach(([cat, amt]) => {
                 const cfg = categoryConfig[cat] || categoryConfig.other;
                 const pct = (amt / total) * 100;
-                html += `<div style="margin-bottom:24px;padding:20px;background:var(--bg-input);border-radius:var(--radius-md);">
+                html += `<div class="clickable" data-cat="${bfEscapeHtml(cat)}" onclick="openCategoryBills(this.dataset.cat)" title="Show bills in this category" style="margin-bottom:24px;padding:20px;background:var(--bg-input);border-radius:var(--radius-md);">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
                         <div style="display:flex;align-items:center;gap:12px;">
                             <div style="width:40px;height:40px;border-radius:var(--radius-sm);background:${colorMap[cfg.color]}15;display:flex;align-items:center;justify-content:center;">
@@ -4131,7 +4199,7 @@
         document.getElementById('bankImportModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeBankImportModal();});
         document.getElementById('setBalanceModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeSetBalanceModal();});
         document.getElementById('budgetEditModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeBudgetEditModal();});
-        document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();closePaymentModal();closeBulkPaymentModal();closeAccountModal();closeUnpayModal();closeBudgetEditModal();closeDepositModal();closeBankImportModal();closeSetBalanceModal();closeImportPreviewModal();closeImportModal();closeRestoreModal();closeChatPeopleModal();closeBillTagModal();}if(e.key==='n'&&e.ctrlKey){e.preventDefault();openModal();}});
+        document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();closePaymentModal();closeBulkPaymentModal();closeAccountModal();closeUnpayModal();closeBudgetEditModal();closeDepositModal();closeBankImportModal();closeSetBalanceModal();closeImportPreviewModal();closeImportModal();closeRestoreModal();closeChatPeopleModal();closeBillTagModal();closeCategoryBillsModal();}if(e.key==='n'&&e.ctrlKey){e.preventDefault();openModal();}});
 
         // ============================================================
         // SERVER-SYNCED STATE (replaces the old localStorage store)
@@ -4581,6 +4649,8 @@
             if (cpm) cpm.addEventListener('click', e => { if (e.target === e.currentTarget) closeChatPeopleModal(); });
             const btm = document.getElementById('billTagModal');
             if (btm) btm.addEventListener('click', e => { if (e.target === e.currentTarget) closeBillTagModal(); });
+            const cbm = document.getElementById('categoryBillsModal');
+            if (cbm) cbm.addEventListener('click', e => { if (e.target === e.currentTarget) closeCategoryBillsModal(); });
         })();
 
         // Load saved theme on startup
