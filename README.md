@@ -262,6 +262,35 @@ Then sign in with Google as usual and open `https://your-domain/admin/` —
 no password needed, your existing session is enough. There you can inspect
 users, sharing memberships and each page's stored JSON document.
 
+## Fixing admin access ("You are authenticated as ..., but are not authorized")
+
+The `/admin/` section needs the **staff flag**, which BillFlow grants
+automatically to the account whose **Google email matches the
+`BILLFLOW_ADMIN_EMAIL` stack variable** (checked at every container start and
+on every sign-in). If you see Django's *"authenticated as ..., but are not
+authorized"* message, the variable doesn't match the account you signed in
+with. In order of likelihood:
+
+1. **The variable is missing or wrong in the stack.** Portainer → your
+   BillFlow stack → *Editor*: make sure
+   `BILLFLOW_ADMIN_EMAIL=you@gmail.com` (exactly the Google address you sign
+   in with) is present, then **Re-deploy**. The container start-up log will
+   print `admin access ensured for 1 user(s)` when it matches.
+2. **Match but sign in again.** If the variable is correct, simply sign out
+   and back in — the login hook grants access on the spot.
+3. **One-off grant from the console.** Portainer → Containers → the BillFlow
+   container → *Console*:
+   ```sh
+   python manage.py ensure_admin --email you@gmail.com
+   ```
+   That promotes the address immediately (no redeploy). If the email doesn't
+   exist, the command prints **every account email that does** — the usual
+   culprit is signing in with a different Google account than expected
+   (e.g. `jason@gmail.com` vs `jason.wilson1979@gmail.com`).
+4. **Fresh single-account deployments bootstrap automatically**: if the
+   variable is unset and only one account has ever signed in, that account
+   is promoted on first use.
+
 ## Troubleshooting: "failed to read stack.env: Invalid template"
 
 Docker Compose treats `$` inside environment-variable **values** as the start

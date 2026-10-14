@@ -364,8 +364,55 @@ class EnsureAdminTests(TestCase):
         call_command('ensure_admin', verbosity=0)
         self.assertFalse(User.objects.filter(email__iexact='future@example.com').exists())
 
-    def test_noop_when_env_unset(self):
+    @mock.patch.dict(os.environ, {}, clear=False)
+    def test_bootstrap_promotes_only_account_when_env_unset(self):
+        os.environ.pop('BILLFLOW_ADMIN_EMAIL', None)
+        u = User.objects.create_user(username='solo', email='solo@example.com',
+                                     password='pw123456789')
         call_command('ensure_admin', verbosity=0)
+        u.refresh_from_db()
+        self.assertTrue(u.is_staff)
+        self.assertTrue(u.is_superuser)
+
+        # Ambiguity guard: two accounts and no variable -> no promotion.
+        User.objects.create_user(username='second', email='second@example.com',
+                                 password='pw123456789')
+        v = User.objects.filter(username='solo').first()
+        v.is_staff = False
+        v.is_superuser = False
+        v.save()
+        call_command('ensure_admin', verbosity=0)
+        v.refresh_from_db()
+        self.assertFalse(v.is_staff)
+
+    def test_explicit_email_argument_promotes(self):
+        u = User.objects.create_user(username='x', email='me@example.com',
+                                     password='pw123456789')
+        call_command('ensure_admin', '--email', 'Me@Example.com', verbosity=0)
+        u.refresh_from_db()
+        self.assertTrue(u.is_staff)
+        self.assertTrue(u.is_superuser)
+
+    def test_explicit_email_mismatch_lists_accounts(self):
+        from io import StringIO
+
+        User.objects.create_user(username='a', email='alpha@example.com', password='pw123456789')
+        out = StringIO()
+        call_command('ensure_admin', '--email', 'nope@example.com', verbosity=0, stdout=out)
+        text = out.getvalue()
+        self.assertIn('no user found with email nope@example.com', text)
+        self.assertIn('alpha@example.com', text)
+
+    @mock.patch.dict(os.environ, {'BILLFLOW_ADMIN_EMAIL': 'ghost@example.com'})
+    def test_env_mismatch_lists_accounts(self):
+        from io import StringIO
+
+        User.objects.create_user(username='a', email='alpha@example.com', password='pw123456789')
+        out = StringIO()
+        call_command('ensure_admin', verbosity=0, stdout=out)
+        text = out.getvalue()
+        self.assertIn('no user found with email ghost@example.com', text)
+        self.assertIn('alpha@example.com', text)
 
 
 class BrandTests(TestCase):
