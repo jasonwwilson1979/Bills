@@ -1134,6 +1134,7 @@
                     <label class="form-label">Bank statement (CSV)</label>
                     <input type="file" class="form-input" id="bankImportFile" accept=".csv,text/csv" onchange="handleBankFileSelect(this)">
                 </div>
+                <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 14px;">Re-importing is safe — rows already in this account are <b>updated in place</b> (posted amounts/descriptions win) and only new rows are added. To start the account over, use <b>Clear transactions</b> in its activity view.</p>
                 <div id="bankImportSetup" style="display:none;">
                     <h3 class="settings-section-title">Column mapping</h3>
                     <div id="bankMappingFields" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;"></div>
@@ -1200,6 +1201,7 @@
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="closeWithdrawalsModal()">Close</button>
+                <button class="btn btn-secondary" onclick="clearAccountTransactions()" style="color:var(--accent-red);"><i class="fas fa-trash"></i> Clear transactions</button>
                 <button class="btn btn-secondary" onclick="exportWithdrawals()"><i class="fas fa-download"></i> Export CSV</button>
                 <button class="btn btn-secondary" onclick="openSetBalanceModal()"><i class="fas fa-scale-balanced"></i> Set balance</button>
             </div>
@@ -2117,6 +2119,7 @@
         let activitySort = 'date';
         let activitySearch = '';
         let currentActivityRows = [];
+        let activitySelected = new Set(); // indices (r._i) selected in the current view
 
         function getAllAccountWithdrawals(accountId) {
             const withdrawals = [];
@@ -2141,10 +2144,10 @@
         function getAllAccountActivity(accountId) {
             const rows = [];
             const acc = accounts.find(a => a.id === accountId);
-            (acc && acc.deposits ? acc.deposits : []).forEach(d => rows.push({ date: d.date, amount: d.amount, type: 'in', source: 'deposit', label: d.note || 'Deposit', billName: '', category: '', note: d.note || '' }));
-            (acc && acc.debits ? acc.debits : []).forEach(d => rows.push({ date: d.date, amount: d.amount, type: 'out', source: 'bank', label: d.note || 'Bank transaction', billName: '', category: '', note: d.note || '', matchKey: d.matchKey || '' }));
+            (acc && acc.deposits ? acc.deposits : []).forEach(d => rows.push({ date: d.date, amount: d.amount, type: 'in', source: 'deposit', label: d.note || 'Deposit', billName: '', category: '', note: d.note || '', _dep: d }));
+            (acc && acc.debits ? acc.debits : []).forEach(d => rows.push({ date: d.date, amount: d.amount, type: 'out', source: 'bank', label: d.note || 'Bank transaction', billName: '', category: '', note: d.note || '', matchKey: d.matchKey || '', _deb: d }));
             bills.forEach(bill => (bill.payments || []).forEach(p => {
-                if (p.accountId === accountId) rows.push({ date: p.date, amount: p.amount, type: 'out', source: 'bill', label: billTitle(bill), billName: billTitle(bill), category: bill.category, note: p.note || '' });
+                if (p.accountId === accountId) rows.push({ date: p.date, amount: p.amount, type: 'out', source: 'bill', label: billTitle(bill), billName: billTitle(bill), category: bill.category, note: p.note || '', _bill: bill, _pay: p });
             }));
             rows.sort((a, b) => (a.date < b.date ? 1 : -1));
             return rows;
@@ -2159,11 +2162,13 @@
         }
         function filterActivityByYear(year, el) {
             activityYear = year;
+            activitySelected.clear();
             if (el) { el.parentElement.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active')); el.classList.add('active'); }
             renderWithdrawalsList();
         }
         function sortActivity(sortBy, el) {
             activitySort = sortBy;
+            activitySelected.clear();
             if (el) { el.parentElement.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active')); el.classList.add('active'); }
             renderWithdrawalsList();
         }
@@ -2207,6 +2212,14 @@
             const grouped = {};
             activity.forEach(r => { const y = (r.date || '').slice(0, 4) || 'Unknown'; (grouped[y] = grouped[y] || []).push(r); });
 
+            // Multi-select bar: select-all, count, delete-selected
+            const selCount = activitySelected.size;
+            const bulkBar = activity.length ? `<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:10px 12px;background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-sm);margin-bottom:14px;font-size:13px;">
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:var(--text-secondary);"><input type="checkbox" ${selCount && selCount === activity.length ? 'checked' : ''} onchange="activityToggleAll(this.checked)" style="width:16px;height:16px;accent-color:var(--accent-blue);cursor:pointer;">Select all</label>
+                <span style="color:var(--text-muted);">${selCount ? `${selCount} selected` : `${activity.length} transaction${activity.length === 1 ? '' : 's'}`}</span>
+                ${selCount ? `<button class="btn btn-secondary btn-sm" onclick="activityDeleteSelected()" style="color:var(--accent-red);border-color:rgba(239,68,68,0.4);"><i class="fas fa-trash"></i> Delete selected</button><button class="btn btn-secondary btn-sm" onclick="activityClearSelection()">Clear selection</button>` : ''}
+            </div>` : '';
+
             let html = '';
             Object.entries(grouped).sort((a, b) => b[0].localeCompare(a[0])).forEach(([year, list]) => {
                 const yIn = list.filter(r => r.type === 'in').reduce((s, r) => s + r.amount, 0);
@@ -2215,7 +2228,8 @@
                 list.forEach(r => {
                     const isIn = r.type === 'in';
                     const cat = r.category ? (categoryConfig[r.category] || categoryConfig.other) : null;
-                    html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:var(--bg-input);border-radius:var(--radius-sm);margin-bottom:6px;">
+                    html += `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;background:var(--bg-input);border-radius:var(--radius-sm);margin-bottom:6px;">
+                        <input type="checkbox" ${activitySelected.has(r._i) ? 'checked' : ''} onchange="activityRowCheck(${r._i}, this.checked)" title="Select for deletion" style="width:16px;height:16px;accent-color:var(--accent-blue);cursor:pointer;flex-shrink:0;margin:0;">
                         <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0;">
                             <div style="width:32px;height:32px;border-radius:var(--radius-sm);background:${isIn ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)'};display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fas ${isIn ? 'fa-arrow-down' : 'fa-arrow-up'}" style="font-size:11px;color:${isIn ? 'var(--accent-green)' : 'var(--accent-red)'};"></i></div>
                             <div style="min-width:0;"><div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${bfEscapeHtml(r.label)}</div><div style="font-size:11px;color:var(--text-muted);">${formatDate(r.date)}${r.note && r.note !== r.label ? ' · ' + bfEscapeHtml(r.note) : ''}${!isIn && cat ? ` · <span class="category-tag ${cat.class}">${cat.label}</span>` : ''}</div></div>
@@ -2226,7 +2240,7 @@
                 html += '</div>';
             });
 
-            document.getElementById('withdrawalsList').innerHTML = html || (q
+            document.getElementById('withdrawalsList').innerHTML = (bulkBar + html) || (q
                 ? '<div class="empty-state" style="padding:40px 20px;"><i class="fas fa-magnifying-glass" style="font-size:32px;"></i><h3>No matches</h3><p>Nothing matches your search in this view.</p></div>'
                 : '<div class="empty-state" style="padding:40px 20px;"><i class="fas fa-check-circle" style="font-size:32px;"></i><h3>No activity yet</h3><p>Deposits and bill payments on this account will appear here.</p></div>');
         }
@@ -2237,6 +2251,7 @@
             if (!account) return;
             document.getElementById('withdrawalsModalTitle').textContent = `${account.name} — Activity`;
             activityYear = 'all'; activitySort = 'date'; activitySearch = '';
+            activitySelected.clear();
             document.getElementById('activitySearch').value = '';
             renderWithdrawalYearTabs(); renderWithdrawalsList();
             document.getElementById('withdrawalsModal').classList.add('active');
@@ -2244,6 +2259,7 @@
 
         function closeWithdrawalsModal() {
             document.getElementById('withdrawalsModal').classList.remove('active');
+            activitySelected.clear();
             currentWithdrawalAccountId = null;
         }
 
@@ -2258,6 +2274,73 @@
             const blob = new Blob([csv], { type: 'text/csv' }), url = URL.createObjectURL(blob), a = document.createElement('a');
             a.href = url; a.download = `${account.name.replace(/\s+/g, '_')}_activity_${new Date().toISOString().split('T')[0]}.csv`; a.click(); URL.revokeObjectURL(url);
             showToast('Activity exported!', 'success');
+        }
+
+        // ============ ACTIVITY MULTI-SELECT + DELETE ============
+        function activityRowCheck(i, checked) {
+            if (checked) activitySelected.add(i); else activitySelected.delete(i);
+            renderWithdrawalsList();
+        }
+        function activityToggleAll(checked) {
+            activitySelected = new Set(checked ? currentActivityRows.map(r => r._i) : []);
+            renderWithdrawalsList();
+        }
+        function activityClearSelection() {
+            activitySelected.clear();
+            renderWithdrawalsList();
+        }
+        function activityDeleteSelected() {
+            if (viewOnlyMode()) { showToast('👁️ View-only access.', 'info'); return; }
+            const acc = accounts.find(a => a.id === currentWithdrawalAccountId);
+            if (!acc || !activitySelected.size) return;
+            const rows = currentActivityRows.filter(r => activitySelected.has(r._i));
+            if (!rows.length) return;
+            const nPay = rows.filter(r => r.source === 'bill').length;
+            const msg = `Delete ${rows.length} selected transaction${rows.length === 1 ? '' : 's'}?`
+                + (nPay ? `\n\n${nPay} of them are bill payment(s) — they will be removed from their bills' history (the bills themselves are kept).` : '')
+                + `\n\nThe account balance is not changed — use "Set balance" afterwards if needed.`;
+            if (!confirm(msg)) return;
+            rows.forEach(r => {
+                if (r.source === 'deposit') acc.deposits = (acc.deposits || []).filter(x => x !== r._dep);
+                else if (r.source === 'bank') acc.debits = (acc.debits || []).filter(x => x !== r._deb);
+                else if (r.source === 'bill' && r._bill && r._pay) {
+                    r._bill.payments = (r._bill.payments || []).filter(p => p !== r._pay);
+                    if (r._bill.isPayoff) r._bill.paidAmount = Math.max(0, (r._bill.paidAmount || 0) - (r.amount || 0));
+                    if (!(r._bill.payments || []).length) r._bill.status = 'pending';
+                }
+            });
+            activitySelected.clear();
+            saveData(); renderAll();
+            renderWithdrawalYearTabs(); renderWithdrawalsList();
+            showToast(`Deleted ${rows.length} transaction${rows.length === 1 ? '' : 's'}.`, 'success');
+        }
+        function clearAccountTransactions() {
+            if (viewOnlyMode()) { showToast('👁️ View-only access.', 'info'); return; }
+            if (!currentWithdrawalAccountId) return;
+            const acc = accounts.find(a => a.id === currentWithdrawalAccountId);
+            if (!acc) return;
+            const nDep = (acc.deposits || []).length, nDeb = (acc.debits || []).length;
+            let nPay = 0;
+            bills.forEach(b => (b.payments || []).forEach(p => { if (p.accountId === acc.id) nPay++; }));
+            if (!nDep && !nDeb && !nPay) { showToast('This account has no transactions to clear.', 'info'); return; }
+            const msg = `Clear ALL transactions on "${acc.name}"?\n\n`
+                + `• ${nDep} deposit(s) and ${nDeb} bank transaction(s) will be removed\n`
+                + `• ${nPay} bill payment(s) recorded from this account will be removed from their bills (the bills themselves are kept)\n\n`
+                + `Re-importing a statement afterwards starts fresh. The account balance is not changed — use "Set balance" to correct it.`;
+            if (!confirm(msg)) return;
+            acc.deposits = []; acc.debits = [];
+            bills.forEach(b => {
+                if (!(b.payments || []).some(p => p.accountId === acc.id)) return;
+                const removed = b.payments.filter(p => p.accountId === acc.id);
+                b.payments = b.payments.filter(p => p.accountId !== acc.id);
+                if (b.isPayoff) b.paidAmount = Math.max(0, (b.paidAmount || 0) - removed.reduce((s, p) => s + p.amount, 0));
+                if (!(b.payments || []).length) b.status = 'pending';
+            });
+            activitySelected.clear();
+            activityYear = 'all';
+            saveData(); renderAll();
+            renderWithdrawalYearTabs(); renderWithdrawalsList();
+            showToast(`Cleared ${nDep + nDeb + nPay} transaction(s) from "${acc.name}".`, 'success');
         }
 
         function renderAccounts() {
@@ -3564,7 +3647,7 @@
                 <div style="${cell}"><div style="font-size:11px;color:var(--text-muted);">Credits (in)</div><div style="font-size:16px;font-weight:800;color:var(--accent-green);">+${formatCurrency(inT)}</div></div>
                 <div style="${cell}"><div style="font-size:11px;color:var(--text-muted);">Debits (out)</div><div style="font-size:16px;font-weight:800;color:var(--accent-red);">-${formatCurrency(outT)}</div></div>
                 <div style="${cell}"><div style="font-size:11px;color:var(--text-muted);">Statement balance</div><div style="font-size:16px;font-weight:800;color:var(--accent-blue);">${bankImportData.finalBalance === null ? 'n/a' : formatCurrency(bankImportData.finalBalance)}</div></div></div>
-                <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0;">Span: ${span}. Credits become deposits, debits become bank transactions; duplicates and debits matching an existing bill payment are skipped.${autoLink.length ? ` <b style="color:var(--accent-blue);">${autoLink.length} row(s) will auto-pay existing bills.</b>` : ''}${bankImportData.finalBalance === null ? ' No Balance column — amounts apply on top of the current balance.' : ` Balance will be set to the statement balance (${formatCurrency(bankImportData.finalBalance)}${bankImportData.finalBalanceDate ? ', as of ' + formatDate(bankImportData.finalBalanceDate) : ''}).`}</p>`;
+                <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0;">Span: ${span}. Credits become deposits, debits become bank transactions; rows already in the account are updated in place (posted amount/description wins), new rows are added, and debits matching an existing bill payment are skipped.${autoLink.length ? ` <b style="color:var(--accent-blue);">${autoLink.length} row(s) will auto-pay existing bills.</b>` : ''}${bankImportData.finalBalance === null ? ' No Balance column — amounts apply on top of the current balance.' : ` Balance will be set to the statement balance (${formatCurrency(bankImportData.finalBalance)}${bankImportData.finalBalanceDate ? ', as of ' + formatDate(bankImportData.finalBalanceDate) : ''}).`}</p>`;
             const tail = rows.slice(-30).reverse();
             document.getElementById('bankImportPreview').innerHTML = rows.length ? `<table class="bank-table"><thead><tr><th>Date</th><th>Description</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead><tbody>${tail.map(r => `<tr><td>${formatDate(r.date)}</td><td class="clip">${bfEscapeHtml(r.note)}${(() => { const mk = descMatchKey(r.desc || r.note); const mb = mk ? bills.find(b => b.matchKey === mk) : null; return mb ? ` <span style="color:var(--accent-blue);">→ ${bfEscapeHtml(billTitle(mb))}</span>` : ''; })()}</td><td style="color:var(--accent-red);">${r.debit ? formatCurrency(r.debit) : ''}</td><td style="color:var(--accent-green);">${r.credit ? formatCurrency(r.credit) : ''}</td><td>${r.balance === null ? '' : formatCurrency(r.balance)}</td></tr>`).join('')}</tbody></table><p style="font-size:11px;color:var(--text-muted);margin:6px 0 0;">Showing the ${Math.min(30, rows.length)} most recent of ${rows.length} row(s).</p>` : '<p style="color:var(--accent-red);font-size:13px;">No rows with a valid date and amount were found — check the column mapping above.</p>';
         }
@@ -3573,38 +3656,79 @@
             const acc = accounts.find(a => a.id === bankImportAccId); if (!acc || !bankImportData) return;
             const rows = (bankImportData.normalizedRows || buildBankRows()).slice().sort((a, b) => (a.date < b.date ? -1 : 1));
             if (!rows.length) { showToast('Nothing to import — check the column mapping.', 'error'); return; }
-            const dup = (list, r, amt) => (list || []).some(x => x.date === r.date && Math.abs((x.amount || 0) - amt) < 0.005 && (x.note || '') === r.note);
-            const billMatch = r => bills.some(b => (b.payments || []).some(p => p.accountId === acc.id && p.date === r.date && Math.abs((p.amount || 0) - r.debit) < 0.005));
+            // MERGE, not reload: rows already in the account are updated in
+            // place (posted amount/description wins) and only unseen rows are
+            // added. Two-tier match per bucket: 1) same date + description,
+            // 2) same date + amount (description changed pending→posted).
+            // Each existing row is claimed at most once, and rows added by
+            // THIS pass are never match targets, so a statement that
+            // legitimately contains a row twice still imports it twice.
             acc.deposits = acc.deposits || []; acc.debits = acc.debits || [];
-            let nIn = 0, nOut = 0, nBills = 0, skipped = 0, inT = 0, outT = 0;
+            const claimedDep = new Set(), claimedDeb = new Set(), claimedPay = new Set();
+            const addedDep = new Set(), addedDeb = new Set();
+            const payOnAcct = (r, amt) => bills.some(b => (b.payments || []).some(p =>
+                p.accountId === acc.id && p.date === r.date && Math.abs((p.amount || 0) - amt) < 0.005 && !claimedPay.has(p)));
+            let nIn = 0, nOut = 0, nBills = 0, nUpd = 0, nSkip = 0, balDelta = 0, inT = 0, outT = 0;
             rows.forEach(r => {
-                if (r.credit > 0) { if (dup(acc.deposits, r, r.credit)) { skipped++; return; } acc.deposits.push({ date: r.date, amount: r.credit, note: r.note }); nIn++; inT += r.credit; }
-                else if (r.debit > 0) {
+                if (r.credit > 0) {
+                    const m = acc.deposits.find(d => !claimedDep.has(d) && !addedDep.has(d) && d.date === r.date && (d.note || '') === r.note)
+                        || acc.deposits.find(d => !claimedDep.has(d) && !addedDep.has(d) && d.date === r.date && Math.abs((d.amount || 0) - r.credit) < 0.005);
+                    if (m) {
+                        claimedDep.add(m);
+                        if (Math.abs((m.amount || 0) - r.credit) >= 0.005) { balDelta += r.credit - (m.amount || 0); m.amount = r.credit; nUpd++; }
+                        else nSkip++;
+                        if ((m.note || '') !== r.note) m.note = r.note;
+                        return;
+                    }
+                    const nd = { date: r.date, amount: r.credit, note: r.note };
+                    acc.deposits.push(nd); addedDep.add(nd); nIn++; inT += r.credit;
+                } else if (r.debit > 0) {
                     const mk = descMatchKey(r.desc || '');
                     const mb = mk ? bills.find(b => b.matchKey === mk) : null;
                     if (mb) {
-                        if (billMatch(r)) { skipped++; return; }
-                        recordTaggedPayment(mb, { date: r.date, amount: r.debit, note: r.note }, acc);
+                        mb.payments = mb.payments || [];
+                        const pay = mb.payments.find(p => !claimedPay.has(p) && p.accountId === acc.id && p.date === r.date && (p.note || '') === r.note)
+                            || mb.payments.find(p => !claimedPay.has(p) && p.accountId === acc.id && p.date === r.date && Math.abs((p.amount || 0) - r.debit) < 0.005);
+                        if (pay) {
+                            claimedPay.add(pay);
+                            if (Math.abs((pay.amount || 0) - r.debit) >= 0.005) { pay.amount = r.debit; if (pay.note) pay.note = r.note; nUpd++; }
+                            else nSkip++;
+                            return;
+                        }
+                        if (payOnAcct(r, r.debit)) { nSkip++; return; }
+                        claimedPay.add(recordTaggedPayment(mb, { date: r.date, amount: r.debit, note: r.note }, acc));
                         nBills++; return;
                     }
-                    if (billMatch(r) || dup(acc.debits, r, r.debit)) { skipped++; return; }
-                    acc.debits.push({ date: r.date, amount: r.debit, note: r.note }); nOut++; outT += r.debit;
+                    const m = acc.debits.find(d => !claimedDeb.has(d) && !addedDeb.has(d) && d.date === r.date && (d.note || '') === r.note)
+                        || acc.debits.find(d => !claimedDeb.has(d) && !addedDeb.has(d) && d.date === r.date && Math.abs((d.amount || 0) - r.debit) < 0.005);
+                    if (m) {
+                        claimedDeb.add(m);
+                        if (Math.abs((m.amount || 0) - r.debit) >= 0.005) { balDelta -= (r.debit - (m.amount || 0)); m.amount = r.debit; nUpd++; }
+                        else nSkip++;
+                        if ((m.note || '') !== r.note) m.note = r.note;
+                        return;
+                    }
+                    if (payOnAcct(r, r.debit)) { nSkip++; return; }
+                    const nd = { date: r.date, amount: r.debit, note: r.note };
+                    acc.debits.push(nd); addedDeb.add(nd); nOut++; outT += r.debit;
                 }
             });
             let balMsg;
             if (bankImportData.finalBalance !== null && bankImportData.finalBalance !== undefined) { acc.balance = bankImportData.finalBalance; balMsg = ` Balance set to ${formatCurrency(acc.balance)}.`; }
-            else { acc.balance = Math.round((acc.balance + inT - outT) * 100) / 100; balMsg = ` Balance adjusted to ${formatCurrency(acc.balance)}.`; }
+            else { acc.balance = Math.round((acc.balance + inT - outT + balDelta) * 100) / 100; balMsg = ` Balance adjusted to ${formatCurrency(acc.balance)}.`; }
             saveData(); closeBankImportModal(); renderAll();
-            showToast(`Imported ${nIn} deposit(s), ${nOut} bank transaction(s) and auto-paid ${nBills} bill(s)${skipped ? ` · ${skipped} skipped` : ''}.${balMsg}`, nIn + nOut + nBills ? 'success' : 'info');
+            showToast(`Imported ${nIn} deposit(s), ${nOut} bank transaction(s) and auto-paid ${nBills} bill(s)${nUpd ? ` · ${nUpd} updated` : ''}${nSkip ? ` · ${nSkip} already present` : ''}.${balMsg}`, nIn + nOut + nBills + nUpd ? 'success' : 'info');
         }
         // ============ ACTIVITY SEARCH + TAG AS BILL ============
-        function activitySearchChanged(v) { activitySearch = v || ''; renderWithdrawalsList(); }
+        function activitySearchChanged(v) { activitySearch = v || ''; activitySelected.clear(); renderWithdrawalsList(); }
         function descMatchKey(s) { return String(s || '').toLowerCase().replace(/[^a-z]/g, ''); }
         function recordTaggedPayment(bill, r, acc) {
             bill.payments = bill.payments || [];
-            bill.payments.push({ date: r.date, amount: r.amount, note: r.note || 'Bank transaction', accountId: acc.id });
+            const p = { date: r.date, amount: r.amount, note: r.note || 'Bank transaction', accountId: acc.id };
+            bill.payments.push(p);
             bill.status = 'paid';
             if (bill.isPayoff) bill.paidAmount = (bill.paidAmount || 0) + r.amount;
+            return p;
         }
         let tagRowIndex = null;
         let tagMode = 'new';

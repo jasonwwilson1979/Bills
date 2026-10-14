@@ -712,6 +712,37 @@ class TemplateScriptTests(TestCase):
         # Auto-match no longer requires the recurring flag
         self.assertNotIn('b.recurring && b.matchKey === mk', html)
 
+    def test_activity_multiselect_and_clear_transactions_exist(self):
+        """Account Activity rows support multi-select + delete, a Clear
+        transactions button sits LEFT of Export CSV, and bank import MERGES
+        (existing rows updated in place, new rows added) instead of
+        duplicating or requiring a wipe first."""
+        from django.conf import settings
+
+        path = os.path.join(str(settings.BASE_DIR), 'templates', 'tracker', 'app.html')
+        with open(path, encoding='utf-8') as fh:
+            html = fh.read()
+        for needle in ('function activityRowCheck(', 'function activityToggleAll(',
+                       'function activityClearSelection(', 'function activityDeleteSelected(',
+                       'function clearAccountTransactions(',
+                       'onchange="activityRowCheck(${r._i}, this.checked)"',
+                       'onchange="activityToggleAll(this.checked)"',
+                       'onclick="clearAccountTransactions()"',
+                       'claimedDep', 'claimedDeb', 'claimedPay',
+                       'addedDep', 'addedDeb',
+                       'balDelta', 'nUpd', 'inT - outT + balDelta'):
+            self.assertIn(needle, html)
+        # Clear-transactions sits to the LEFT of Export CSV in the footer.
+        self.assertLess(html.index('onclick="clearAccountTransactions()"'),
+                        html.index('onclick="exportWithdrawals()"'))
+        # Import no longer blanket-skips duplicates: it overwrites them.
+        self.assertNotIn('const dup = (list, r, amt)', html)
+        self.assertNotIn('const billMatch = r => bills.some', html)
+        self.assertIn('updated in place', html)
+        # Deleted/cleared bill payments revert the bill like Unpay does.
+        self.assertIn("r._bill.status = 'pending'", html)
+        self.assertIn("b.status = 'pending'", html)
+
 
 class TemplateStructureTests(TestCase):
     """Parses the *rendered* app page with html.parser (script bodies are

@@ -58,7 +58,11 @@ Notes:
 - The color-theme picker is still stored per-browser (it's cosmetic).
 - CSV **import and export work exactly as before** — import is fully
   client-side (parsing + column mapping + preview), the result is saved to your
-  account like any other change.
+  account like any other change. **Re-importing is safe:** rows already in the
+  account are *updated in place* (posted amounts/descriptions win) and only new
+  rows are added — nothing is duplicated and nothing is wiped. To start an
+  account over, use **Clear transactions** (in the account's Activity view,
+  next to Export CSV); Activity rows also support multi-select + delete.
 - First sign-in seeds the same sample bills the original app used, so you can
   explore immediately; "Clear Data" in Settings empties your account.
 - **Backup & Restore** in Settings downloads your entire page (bills, accounts,
