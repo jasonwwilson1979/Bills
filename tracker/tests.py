@@ -365,7 +365,7 @@ class EnsureAdminTests(TestCase):
         self.assertFalse(User.objects.filter(email__iexact='future@example.com').exists())
 
     @mock.patch.dict(os.environ, {}, clear=False)
-    def test_bootstrap_promotes_only_account_when_env_unset(self):
+    def test_bootstrap_promotes_oldest_account_when_env_unset(self):
         os.environ.pop('BILLFLOW_ADMIN_EMAIL', None)
         u = User.objects.create_user(username='solo', email='solo@example.com',
                                      password='pw123456789')
@@ -374,7 +374,8 @@ class EnsureAdminTests(TestCase):
         self.assertTrue(u.is_staff)
         self.assertTrue(u.is_superuser)
 
-        # Ambiguity guard: two accounts and no variable -> no promotion.
+        # Multiple accounts: the OLDEST account is still promoted (the owner
+        # on a self-hosted instance must never be locked out of /admin/).
         User.objects.create_user(username='second', email='second@example.com',
                                  password='pw123456789')
         v = User.objects.filter(username='solo').first()
@@ -383,7 +384,29 @@ class EnsureAdminTests(TestCase):
         v.save()
         call_command('ensure_admin', verbosity=0)
         v.refresh_from_db()
-        self.assertFalse(v.is_staff)
+        self.assertTrue(v.is_staff)   # oldest account re-promoted
+        second = User.objects.get(username='second')
+        self.assertFalse(second.is_staff)
+
+    @mock.patch.dict(os.environ, {'BILLFLOW_ADMIN_EMAIL': 'ghost@example.com'})
+    def test_var_mismatch_falls_back_to_oldest_account(self):
+        first = User.objects.create_user(username='first', email='first@example.com',
+                                         password='pw123456789')
+        User.objects.create_user(username='later', email='later@example.com',
+                                 password='pw123456789')
+        call_command('ensure_admin', verbosity=0)
+        first.refresh_from_db()
+        later = User.objects.get(username='later')
+        self.assertTrue(first.is_staff)
+        self.assertFalse(later.is_staff)
+
+    @mock.patch.dict(os.environ, {'BILLFLOW_ADMIN_EMAIL': '"owner@example.com"'})
+    def test_env_value_with_quotes_is_normalized(self):
+        u = User.objects.create_user(username='o', email='owner@example.com',
+                                     password='pw123456789')
+        call_command('ensure_admin', verbosity=0)
+        u.refresh_from_db()
+        self.assertTrue(u.is_staff)
 
     def test_explicit_email_argument_promotes(self):
         u = User.objects.create_user(username='x', email='me@example.com',

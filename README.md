@@ -271,25 +271,29 @@ on every sign-in). If you see Django's *"authenticated as ..., but are not
 authorized"* message, the variable doesn't match the account you signed in
 with. In order of likelihood:
 
-1. **The variable is missing or wrong in the stack.** Portainer → your
+1. **The variable is missing, mistyped, or quoted.** Portainer → your
    BillFlow stack → *Editor*: make sure
    `BILLFLOW_ADMIN_EMAIL=you@gmail.com` (exactly the Google address you sign
-   in with) is present, then **Re-deploy**. The container start-up log will
-   print `admin access ensured for 1 user(s)` when it matches.
+   in with, no quotes) is present, then **Re-deploy**. The container start-up
+   log prints `admin access ensured for 1 user(s)` when it matches, or a
+   warning listing every account email it can see when it doesn't.
 2. **Match but sign in again.** If the variable is correct, simply sign out
    and back in — the login hook grants access on the spot.
-3. **One-off grant from the console.** Portainer → Containers → the BillFlow
-   container → *Console*:
+3. **One-off grant from the console (works on any image version).**
+   Portainer → Containers → the BillFlow container → *Console*:
    ```sh
-   python manage.py ensure_admin --email you@gmail.com
+   python manage.py shell -c "from django.contrib.auth.models import User; u=User.objects.order_by('pk').first(); u.is_staff=u.is_superuser=True; u.save(); print('promoted', u.email or u.username)"
    ```
-   That promotes the address immediately (no redeploy). If the email doesn't
-   exist, the command prints **every account email that does** — the usual
-   culprit is signing in with a different Google account than expected
-   (e.g. `jason@gmail.com` vs `jason.wilson1979@gmail.com`).
-4. **Fresh single-account deployments bootstrap automatically**: if the
-   variable is unset and only one account has ever signed in, that account
-   is promoted on first use.
+   That promotes your first account immediately (no redeploy). To see every
+   account email on the deployment:
+   ```sh
+   python manage.py shell -c "from django.contrib.auth.models import User; print(list(User.objects.values_list('email', flat=True)))"
+   ```
+4. **Self-healing fallback**: at every container start and sign-in, if the
+   variable matches nobody (or is unset), BillFlow promotes the **oldest
+   account** (the first that ever signed up — you on this instance) and logs
+   a warning explaining how to pin a specific address. You can't be locked
+   out of `/admin/`.
 
 ## Troubleshooting: "failed to read stack.env: Invalid template"
 

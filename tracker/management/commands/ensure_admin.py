@@ -3,7 +3,7 @@ import os
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 
-from tracker.admin_access import _account_emails, ensure_admin_access
+from tracker.admin_access import _account_emails, _normalize_email, ensure_admin_access
 
 
 class Command(BaseCommand):
@@ -32,11 +32,19 @@ class Command(BaseCommand):
                                   + (', '.join(_account_emails()) or 'NONE'))
             return
 
+        email = _normalize_email(os.environ.get('BILLFLOW_ADMIN_EMAIL'))
+        mismatch = bool(email) and not get_user_model().objects.filter(
+            email__iexact=email).exists()
         updated = ensure_admin_access()
+        if mismatch:
+            self.stdout.write(self.style.WARNING(
+                f'no user found with email {email}'))
+            self.stdout.write('existing account emails: '
+                              + (', '.join(_account_emails()) or 'NONE'))
         if updated is None:
             self.stdout.write(
-                'BILLFLOW_ADMIN_EMAIL not set (and no single-account '
-                'bootstrap applied) - nothing to do')
+                'No accounts exist yet - admin access will be granted on '
+                'the first sign-in.')
         elif updated == 0:
             self.stdout.write(self.style.WARNING(
                 f'no user found with email '
