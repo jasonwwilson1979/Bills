@@ -226,6 +226,14 @@ Open **Settings → Sharing** to give other Google accounts access to your page:
 - **Tag bills in chat** — hit the 💳 button in the chat composer (or type
   `[[bill:ID]]`) to embed a bill chip; clicking it jumps to the bill in
   All Bills, opens its month and highlights the row.
+- **Bill titles** — every bill has an optional **Title** (what the app shows
+  everywhere) separate from its **Name** (the raw bank line kept for
+  reference). Import a statement line like
+  `75182 PURCHASE-SIG VIRGINIA FEDERAL CR 800-285-6609 VA 00000`, tag it once
+  as "Car Payment", and every future import with the same description
+  auto-links to that bill as a payment and displays "Car Payment" — no more
+  renaming or manual linking. Auto-matching now works whether or not the
+  bill is marked recurring. CSV export includes a Title column.
 - **Fully responsive on phones** — bill rows reflow to two lines, inputs use
   16px text so iOS Safari doesn't zoom on focus, modals become near-full-width
   sheets, summaries and tab rows wrap, and wide tables scroll instead of

@@ -1,0 +1,3 @@
+L1049  <h4 id="payBillName" style="font-size:15px;font-weight:700;">Credit Card</h4>
+L2327  document.getElementById('billName').value=bill.name;document.getElementById('billAmount').value=bill.amount;
+L2393  document.getElementById('payBillName').textContent=bill.name;

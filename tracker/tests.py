@@ -621,6 +621,27 @@ class TemplateScriptTests(TestCase):
         # budget legend, report breakdown, report legend.
         self.assertEqual(html.count('onclick="openCategoryBills(this.dataset.cat)"'), 4)
 
+    def test_bill_titles_and_import_automatch_exist(self):
+        """Bills carry an optional Title shown everywhere (raw bank
+        description stays as the name), and bank imports auto-link rows to
+        any previously tagged bill via its match signature."""
+        from django.conf import settings
+
+        path = os.path.join(str(settings.BASE_DIR), 'templates', 'tracker', 'app.html')
+        with open(path, encoding='utf-8') as fh:
+            html = fh.read()
+        for needle in ('function billTitle(', 'id="billTitle"',
+                       'name,title,amount', 'name: name, title: title',
+                       'let tagRawName', "tagNewName').value = ''",
+                       "h=['Name','Title','Amount'",
+                       'b.matchKey === mk', 'bills.find(b => b.matchKey === mk)'):
+            self.assertIn(needle, html)
+        # Title used across the board: bill rows, calendar, savings, debts,
+        # plan lists, payment modals, chips, pickers...
+        self.assertGreaterEqual(html.count('billTitle('), 20)
+        # Auto-match no longer requires the recurring flag
+        self.assertNotIn('b.recurring && b.matchKey === mk', html)
+
 
 class TemplateStructureTests(TestCase):
     """Parses the *rendered* app page with html.parser (script bodies are

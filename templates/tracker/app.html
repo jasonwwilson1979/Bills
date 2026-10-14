@@ -969,7 +969,8 @@
         <div class="modal">
             <div class="modal-header"><h3 class="modal-title" id="modalTitle">Add New Bill</h3><button class="modal-close" onclick="closeModal()"><i class="fas fa-times"></i></button></div>
             <div class="modal-body">
-                <div class="form-group"><label class="form-label">Bill Name</label><input type="text" class="form-input" id="billName" placeholder="e.g., Electric Bill"></div>
+                <div class="form-group"><label class="form-label">Title <span style="font-size:11px;color:var(--text-muted);font-weight:400;">what you'll see everywhere</span></label><input type="text" class="form-input" id="billTitle" maxlength="80" placeholder='e.g., Car Payment'><p class="form-hint">Optional. Title imported bank bills once ("Car Payment") and every future import with the same description auto-links and shows this title.</p></div>
+                <div class="form-group"><label class="form-label">Name <span style="font-size:11px;color:var(--text-muted);font-weight:400;">raw bank description / identifier</span></label><input type="text" class="form-input" id="billName" placeholder="e.g., Electric Bill"><p class="form-hint">The raw line from your bank import is kept here for reference — the Title above is what the app displays.</p></div>
                 <div class="form-row">
                     <div class="form-group"><label class="form-label">Monthly Payment ($)</label><input type="number" class="form-input" id="billAmount" placeholder="0.00" step="0.01" min="0"></div>
                     <div class="form-group"><label class="form-label">Due Date</label><input type="date" class="form-input" id="billDueDate"></div>
@@ -1161,7 +1162,7 @@
                     <button class="filter-tab" id="tagModeExistBtn" onclick="setTagMode('existing', this)">Link to existing bill</button>
                 </div>
                 <div id="tagNewPanel">
-                    <div class="form-group"><label class="form-label">Bill name</label><input type="text" class="form-input" id="tagNewName" maxlength="60"></div>
+                    <div class="form-group"><label class="form-label">Title (what you call this bill)</label><input type="text" class="form-input" id="tagNewName" maxlength="80" placeholder='e.g., Car Payment'><p class="form-hint">The raw bank description is kept as the bill's name for import matching — this title is what you'll see everywhere.</p></div>
                     <div class="form-row">
                         <div class="form-group"><label class="form-label">Amount ($/mo)</label><input type="number" class="form-input" id="tagNewAmount" step="0.01" min="0"></div>
                         <div class="form-group"><label class="form-label">Category</label><select class="form-select" id="tagNewCategory"></select></div>
@@ -1557,6 +1558,7 @@
         let billsViewDate = new Date(); // Month navigator state
 
         function getAppName() { return (bfState && bfState.appName) || 'BillFlow'; }
+        function billTitle(b) { return (b && b.title) ? b.title : (b ? b.name : ''); }
         function setAppName(name) { ensureState(); bfState.appName = name; document.getElementById('sidebarAppName').textContent = name; document.getElementById('appTitleTag').textContent = name + ' — Smart Bill Tracker'; }
         function saveAppName() { const name = document.getElementById('appNameInput').value.trim(); if (!name) { showToast('Please enter an app name.', 'error'); return; } setAppName(name); saveData(); showToast(`App renamed to "${name}"!`, 'success'); }
 
@@ -1654,7 +1656,7 @@
             return `<div class="bill-row${sel?' selected':''}" data-bid="${bill.id}">
                 <input type="checkbox" class="bill-checkbox" ${sel?'checked':''} onclick="event.stopPropagation();toggleBillSelection(${bill.id})" title="Select for bulk payment">
                 <div class="bill-icon ${cat.class}"><i class="fas ${cat.icon}"></i></div>
-                <div class="bill-info"><h4>${bill.name}${bill.recurring?'<span class="recurring-badge"><i class="fas fa-redo"></i> Monthly</span>':''}</h4><p><span class="category-tag ${bill.category}">${cat.label}</span> <span class="bill-status ${st}"><span class="bill-status-dot"></span>${stLabel}</span></p>${getPayoffHTML(bill)}</div>
+                <div class="bill-info"><h4>${billTitle(bill)}${bill.recurring?'<span class="recurring-badge"><i class="fas fa-redo"></i> Monthly</span>':''}</h4><p><span class="category-tag ${bill.category}">${cat.label}</span> <span class="bill-status ${st}"><span class="bill-status-dot"></span>${stLabel}</span></p>${getPayoffHTML(bill)}</div>
                 <div class="bill-amount">${isPayoff?`${formatCurrency(bill.amount)}<div style="font-size:11px;color:var(--text-muted);font-weight:500;">/mo</div>`:formatCurrency(bill.amount)}</div>
                 <div class="bill-date">${formatDate(getProjectedDueDate(bill))}</div>
                 <div class="bill-actions">
@@ -1812,13 +1814,13 @@
 
             let f = monthBills.filter(b => {
                 const matchFilter = currentFilter === 'all' || billMonthStatus(b, view.y, view.m) === currentFilter;
-                const matchSearch = b.name.toLowerCase().includes(s) || b.category.includes(s);
+                const matchSearch = billTitle(b).toLowerCase().includes(s) || b.name.toLowerCase().includes(s) || b.category.includes(s);
                 return matchFilter && matchSearch;
             });
 
             if (currentSort === 'date') f.sort((a,b) => new Date(a.dueDate) - new Date(b.dueDate));
             else if (currentSort === 'amount') f.sort((a,b) => b.amount - a.amount);
-            else f.sort((a,b) => a.name.localeCompare(b.name));
+            else f.sort((a,b) => billTitle(a).localeCompare(billTitle(b)));
 
             // Render month summary
             renderMonthSummary(monthBills);
@@ -1886,7 +1888,7 @@
             const c=document.getElementById('timelineContainer');
             const now=new Date();
             const w=bills.filter(b=>{const d=new Date(b.dueDate);const diff=(d-now)/(864e5);return diff>=-1&&diff<=7;}).sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate));
-            c.innerHTML=w.length?w.map(b=>{const cat=categoryConfig[b.category]||categoryConfig.other;return `<div class="timeline-item" onclick="editBill(${b.id})"><div class="timeline-dot ${cat.color}"></div><div class="timeline-content"><h4>${b.name}</h4><p>${formatDate(b.dueDate)} · ${cat.label}</p></div><div class="timeline-amount">${formatCurrency(b.amount)}</div></div>`;}).join(''):`<div class="empty-state" style="padding:30px;"><i class="fas fa-calendar-check" style="font-size:32px;"></i><h3>No bills this week</h3><p>You're all clear!</p></div>`;
+            c.innerHTML=w.length?w.map(b=>{const cat=categoryConfig[b.category]||categoryConfig.other;return `<div class="timeline-item" onclick="editBill(${b.id})"><div class="timeline-dot ${cat.color}"></div><div class="timeline-content"><h4>${bfEscapeHtml(billTitle(b))}</h4><p>${formatDate(b.dueDate)} · ${cat.label}</p></div><div class="timeline-amount">${formatCurrency(b.amount)}</div></div>`;}).join(''):`<div class="empty-state" style="padding:30px;"><i class="fas fa-calendar-check" style="font-size:32px;"></i><h3>No bills this week</h3><p>You're all clear!</p></div>`;
         }
         function renderBarChart() {
             const c=document.getElementById('barChart');
@@ -1908,7 +1910,7 @@
             const fd=new Date(y,m,1).getDay(),dim=new Date(y,m+1,0).getDate(),dip=new Date(y,m,0).getDate();
             let h=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d=>`<div class="calendar-header-cell">${d}</div>`).join('');
             for(let i=fd-1;i>=0;i--)h+=`<div class="calendar-cell other-month"><div class="calendar-date">${dip-i}</div></div>`;
-            for(let d=1;d<=dim;d++){const ds=`${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`,it=today.getFullYear()===y&&today.getMonth()===m&&today.getDate()===d,db=bills.filter(b=>{billsViewDate=calendarDate;const projDate=getProjectedDueDate(b);return projDate===ds;});h+=`<div class="calendar-cell${it?' today':''}"><div class="calendar-date">${d}</div>${db.map(b=>{const c=categoryConfig[b.category]||categoryConfig.other;return `<div class="calendar-bill ${c.color}" onclick="editBill(${b.id})" title="${b.name}">${b.name}</div>`;}).join('')}</div>`;}
+            for(let d=1;d<=dim;d++){const ds=`${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`,it=today.getFullYear()===y&&today.getMonth()===m&&today.getDate()===d,db=bills.filter(b=>{billsViewDate=calendarDate;const projDate=getProjectedDueDate(b);return projDate===ds;});h+=`<div class="calendar-cell${it?' today':''}"><div class="calendar-date">${d}</div>${db.map(b=>{const c=categoryConfig[b.category]||categoryConfig.other;const bt=bfEscapeHtml(billTitle(b));return `<div class="calendar-bill ${c.color}" onclick="editBill(${b.id})" title="${bt}">${bt}</div>`;}).join('')}</div>`;}
             const tc=fd+dim,rem=(7-(tc%7))%7;for(let i=1;i<=rem;i++)h+=`<div class="calendar-cell other-month"><div class="calendar-date">${i}</div></div>`;
             g.innerHTML=h;
         }
@@ -2007,7 +2009,7 @@
                 return `<div class="savings-bill-item${sel?' selected':''}" onclick="toggleSavingsBill(${bill.id})">
                     <div class="savings-check"><i class="fas fa-check"></i></div>
                     <div class="savings-bill-icon ${cat.class}"><i class="fas ${cat.icon}"></i></div>
-                    <div class="savings-bill-info"><h4>${bill.name}</h4><p>${cat.label}${bill.isPayoff?` · ${monthsToPayoff} mo to payoff`:''}</p></div>
+                    <div class="savings-bill-info"><h4>${billTitle(bill)}</h4><p>${cat.label}${bill.isPayoff?` · ${monthsToPayoff} mo to payoff`:''}</p></div>
                     ${bill.isPayoff&&rem>0?`<span class="savings-bill-payoff">${formatCurrency(rem)} left</span>`:''}
                     <span class="savings-bill-amount">${formatCurrency(bill.amount)}<span style="font-size:10px;color:var(--text-muted);font-weight:500;">/mo</span></span>
                 </div>`;
@@ -2051,7 +2053,7 @@
                     const months = amort.months === null ? '∞' : amort.months;
                     const totalInterest = amort.totalInterest || 0;
                     html+=`<div style="margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid rgba(139,92,246,0.15);">
-                        <div class="savings-payoff-row"><span class="label">${b.name}</span><span class="value" style="color:var(--accent-purple);">${formatCurrency(rem)} remaining</span></div>
+                        <div class="savings-payoff-row"><span class="label">${billTitle(b)}</span><span class="value" style="color:var(--accent-purple);">${formatCurrency(rem)} remaining</span></div>
                         <div class="savings-payoff-row"><span class="label">Months to payoff</span><span class="value">${months === '∞' ? '⚠️ Payment too low' : months + ' months'}</span></div>
                         <div class="savings-payoff-row"><span class="label">Cost to eliminate</span><span class="value">${formatCurrency(rem)}</span></div>
                         ${b.interestRate > 0 ? `<div class="savings-payoff-row"><span class="label" style="color:var(--accent-orange);">🏦 ${getRateLabel(b)}</span><span class="value" style="color:var(--accent-orange);">+${formatCurrency(rem * getMonthlyRate(b))}/mo now</span></div>` : ''}
@@ -2142,7 +2144,7 @@
             (acc && acc.deposits ? acc.deposits : []).forEach(d => rows.push({ date: d.date, amount: d.amount, type: 'in', source: 'deposit', label: d.note || 'Deposit', billName: '', category: '', note: d.note || '' }));
             (acc && acc.debits ? acc.debits : []).forEach(d => rows.push({ date: d.date, amount: d.amount, type: 'out', source: 'bank', label: d.note || 'Bank transaction', billName: '', category: '', note: d.note || '', matchKey: d.matchKey || '' }));
             bills.forEach(bill => (bill.payments || []).forEach(p => {
-                if (p.accountId === accountId) rows.push({ date: p.date, amount: p.amount, type: 'out', source: 'bill', label: bill.name, billName: bill.name, category: bill.category, note: p.note || '' });
+                if (p.accountId === accountId) rows.push({ date: p.date, amount: p.amount, type: 'out', source: 'bill', label: billTitle(bill), billName: billTitle(bill), category: bill.category, note: p.note || '' });
             }));
             rows.sort((a, b) => (a.date < b.date ? 1 : -1));
             return rows;
@@ -2321,6 +2323,7 @@
             populateAccountDropdown('billPreferredAccount');
             const pt=document.getElementById('payoffToggle'),pf=document.getElementById('payoffFields');
             if(bill){
+                document.getElementById('billTitle').value=bill.title||'';
                 document.getElementById('billName').value=bill.name;document.getElementById('billAmount').value=bill.amount;
                 document.getElementById('billDueDate').value=bill.dueDate;document.getElementById('billCategory').value=bill.category;
                 document.getElementById('billStatus').value=bill.status;loadBillNotesEditor(bill.notes||'');
@@ -2345,6 +2348,7 @@
                     cbd.style.display = 'none';
                 }
             } else {
+                document.getElementById('billTitle').value='';
                 document.getElementById('billName').value='';document.getElementById('billAmount').value='';
                 document.getElementById('billDueDate').value=new Date().toISOString().split('T')[0];
                 document.getElementById('billCategory').value='utilities';document.getElementById('billStatus').value='pending';
@@ -2355,7 +2359,7 @@
         }
         function closeModal() { document.getElementById('billModal').classList.remove('active');editingBillId=null; }
         function saveBill() {
-            const name=document.getElementById('billName').value.trim(),amount=parseFloat(document.getElementById('billAmount').value),dueDate=document.getElementById('billDueDate').value;
+            const name=document.getElementById('billName').value.trim(),title=document.getElementById('billTitle').value.trim(),amount=parseFloat(document.getElementById('billAmount').value),dueDate=document.getElementById('billDueDate').value;
             const category=document.getElementById('billCategory').value,status=document.getElementById('billStatus').value,notes=document.getElementById('billNotes').value.trim();
             const recurring=document.getElementById('recurringToggle').classList.contains('active'),isPayoff=document.getElementById('payoffToggle').classList.contains('active');
             const totalOwed=isPayoff?parseFloat(document.getElementById('billTotalOwed').value)||0:0;
@@ -2364,12 +2368,12 @@
             const preferredAccountId=parseInt(document.getElementById('billPreferredAccount').value)||null;
             if(!name||!amount||!dueDate){showToast('Fill required fields.','error');return;}
             if(isPayoff&&totalOwed<=0){showToast('Enter valid total balance.','error');return;}
-            if(editingBillId){const idx=bills.findIndex(b=>b.id===editingBillId);if(idx!==-1){bills[idx]={...bills[idx],name,amount,dueDate,category,status,notes,recurring,isPayoff,totalOwed,interestRate,interestRateType,preferredAccountId};if(!isPayoff){bills[idx].paidAmount=0;bills[idx].payments=[];bills[idx].interestRate=0;bills[idx].interestRateType='annual';}}showToast(`"${name}" updated.`,'success');}
-            else{const id=bills.length?Math.max(...bills.map(b=>b.id))+1:1;bills.push({id,name,amount,dueDate,category,status,notes,recurring,isPayoff,totalOwed,interestRate,interestRateType,paidAmount:0,payments:[],preferredAccountId});showToast(`"${name}" added.`,'success');}
+            if(editingBillId){const idx=bills.findIndex(b=>b.id===editingBillId);if(idx!==-1){bills[idx]={...bills[idx],name,title,amount,dueDate,category,status,notes,recurring,isPayoff,totalOwed,interestRate,interestRateType,preferredAccountId};if(!isPayoff){bills[idx].paidAmount=0;bills[idx].payments=[];bills[idx].interestRate=0;bills[idx].interestRateType='annual';}}showToast(`"${billTitle({name:name,title:title})}" updated.`,'success');}
+            else{const id=bills.length?Math.max(...bills.map(b=>b.id))+1:1;bills.push({id,name,title,amount,dueDate,category,status,notes,recurring,isPayoff,totalOwed,interestRate,interestRateType,paidAmount:0,payments:[],preferredAccountId});showToast(`"${billTitle({name:name,title:title})}" added.`,'success');}
             saveData();closeModal();renderAll();
         }
         function editBill(id) { const b=bills.find(x=>x.id===id); if(b) openModal(b); }
-        function deleteBill(id) { const b=bills.find(x=>x.id===id); if(confirm(`Delete "${b?.name}"?`)){bills=bills.filter(x=>x.id!==id);selectedBillIds.delete(id);savingsSelectedIds.delete(id);saveData();renderAll();showToast(`"${b?.name}" deleted.`,'info');} }
+        function deleteBill(id) { const b=bills.find(x=>x.id===id); if(confirm(`Delete "${billTitle(b)}"?`)){bills=bills.filter(x=>x.id!==id);selectedBillIds.delete(id);savingsSelectedIds.delete(id);saveData();renderAll();showToast(`"${billTitle(b)}" deleted.`,'info');} }
 
         // SELECTION & BULK BAR
         function toggleBillSelection(id) { selectedBillIds.has(id)?selectedBillIds.delete(id):selectedBillIds.add(id); renderDashboardBills(); renderAllBills(); updateBulkBar(); }
@@ -2386,7 +2390,7 @@
             paymentBillId=billId;const bill=bills.find(b=>b.id===billId);if(!bill)return;
             const rem=bill.isPayoff?Math.max(0,bill.totalOwed-bill.paidAmount):bill.amount;
             const pct=bill.isPayoff&&bill.totalOwed>0?Math.min((bill.paidAmount/bill.totalOwed)*100,100):0;
-            document.getElementById('payBillName').textContent=bill.name;
+            document.getElementById('payBillName').textContent=billTitle(bill);
             document.getElementById('payBillRemaining').textContent=bill.isPayoff?`${formatCurrency(rem)} left`:`Monthly: ${formatCurrency(bill.amount)}`;
             document.getElementById('payBillProgress').style.width=`${pct}%`;
             document.getElementById('payBillProgress').style.background=bill.isPayoff?'var(--gradient-green)':'var(--gradient-blue)';
@@ -2417,9 +2421,9 @@
             bill.status='paid';
             if(bill.isPayoff){
                 bill.paidAmount=(bill.paidAmount||0)+amount;
-                if(Math.max(0,bill.totalOwed-bill.paidAmount)<=0) showToast(`🎉 "${bill.name}" fully paid off!`,'success');
-                else showToast(`${formatCurrency(amount)} paid for "${bill.name}" from ${acc.name}. ${formatCurrency(Math.max(0,bill.totalOwed-bill.paidAmount))} remaining.`,'success');
-            } else { showToast(`${formatCurrency(amount)} paid for "${bill.name}" from ${acc.name}.`,'success'); }
+                if(Math.max(0,bill.totalOwed-bill.paidAmount)<=0) showToast(`🎉 "${billTitle(bill)}" fully paid off!`,'success');
+                else showToast(`${formatCurrency(amount)} paid for "${billTitle(bill)}" from ${acc.name}. ${formatCurrency(Math.max(0,bill.totalOwed-bill.paidAmount))} remaining.`,'success');
+            } else { showToast(`${formatCurrency(amount)} paid for "${billTitle(bill)}" from ${acc.name}.`,'success'); }
             saveData();closePaymentModal();renderAll();
         }
 
@@ -2430,7 +2434,7 @@
             const lp=bill.payments[bill.payments.length-1],acc=accounts.find(a=>a.id===lp.accountId);
             const cat=categoryConfig[bill.category]||categoryConfig.other;
             document.getElementById('unpayDetails').innerHTML=`
-                <div class="unpay-detail-row"><span class="label">Bill</span><span class="value">${bill.name}</span></div>
+                <div class="unpay-detail-row"><span class="label">Bill</span><span class="value">${bfEscapeHtml(billTitle(bill))}</span></div>
                 <div class="unpay-detail-row"><span class="label">Category</span><span class="value">${cat.label}</span></div>
                 <div class="unpay-detail-row"><span class="label">Last Payment</span><span class="value">${formatCurrency(lp.amount)}</span></div>
                 <div class="unpay-detail-row"><span class="label">Date</span><span class="value">${formatDate(lp.date)}</span></div>
@@ -2450,7 +2454,7 @@
             if(bill.isPayoff){bill.paidAmount=Math.max(0,bill.paidAmount-lp.amount);if(bill.payments.length===0)bill.status='pending';}
             else{if(bill.payments.length===0)bill.status='pending';}
             saveData();closeUnpayModal();renderAll();
-            showToast(`↩ Payment of ${formatCurrency(lp.amount)} reversed for "${bill.name}".`,'success');
+            showToast(`↩ Payment of ${formatCurrency(lp.amount)} reversed for "${billTitle(bill)}".`,'success');
         }
 
         // BULK PAYMENT
@@ -2464,7 +2468,7 @@
             document.getElementById('bulkBillsList').innerHTML=sel.map(b=>{
                 const cat=categoryConfig[b.category]||categoryConfig.other;
                 const payAmt=Math.min(b.amount,b.isPayoff?Math.max(0,b.totalOwed-b.paidAmount):b.amount);
-                return `<div class="bulk-bill-item"><div class="bulk-bill-icon ${cat.class}"><i class="fas ${cat.icon}"></i></div><div class="bulk-bill-info"><h4>${b.name}</h4><p>${cat.label} · ${formatCurrency(b.amount)}/mo</p></div><span class="bulk-bill-remaining">${b.isPayoff?`${formatCurrency(Math.max(0,b.totalOwed-b.paidAmount))} left`:'Monthly'}</span><input type="number" class="bulk-bill-input" id="bulk-amount-${b.id}" value="${payAmt}" step="0.01" min="0" oninput="updateBulkSummary()"></div>`;
+                return `<div class="bulk-bill-item"><div class="bulk-bill-icon ${cat.class}"><i class="fas ${cat.icon}"></i></div><div class="bulk-bill-info"><h4>${bfEscapeHtml(billTitle(b))}</h4><p>${cat.label} · ${formatCurrency(b.amount)}/mo</p></div><span class="bulk-bill-remaining">${b.isPayoff?`${formatCurrency(Math.max(0,b.totalOwed-b.paidAmount))} left`:'Monthly'}</span><input type="number" class="bulk-bill-input" id="bulk-amount-${b.id}" value="${payAmt}" step="0.01" min="0" oninput="updateBulkSummary()"></div>`;
             }).join('');
             updateBulkSummary();
             document.getElementById('bulkPaymentModal').classList.add('active');
@@ -2497,8 +2501,8 @@
         }
 
         function exportData() {
-            const h=['Name','Amount','Due Date','Category','Status','Recurring','Payoff','Total Owed','Paid','Remaining','Notes'];
-            const r=bills.map(b=>[b.name,b.amount,b.dueDate,b.category,b.status,b.recurring,b.isPayoff,b.totalOwed,b.paidAmount,Math.max(0,b.totalOwed-b.paidAmount),b.notes]);
+            const h=['Name','Title','Amount','Due Date','Category','Status','Recurring','Payoff','Total Owed','Paid','Remaining','Notes'];
+            const r=bills.map(b=>[b.name,b.title||'',b.amount,b.dueDate,b.category,b.status,b.recurring,b.isPayoff,b.totalOwed,b.paidAmount,Math.max(0,b.totalOwed-b.paidAmount),b.notes]);
             const csv=[h,...r].map(x=>x.map(c=>`"${c}"`).join(',')).join('\n');
             const blob=new Blob([csv],{type:'text/csv'}),url=URL.createObjectURL(blob),a=document.createElement('a');
             a.href=url;a.download=`billflow_${new Date().toISOString().split('T')[0]}.csv`;a.click();URL.revokeObjectURL(url);showToast('Exported!','success');
@@ -2975,7 +2979,7 @@
             return escapedBody.replace(/\[\[bill:(\d+)\]\]/g, (m0, id) => {
                 const bid = parseInt(id, 10);
                 const b = bills.find(x => x.id === bid);
-                const label = b ? b.name : 'deleted bill';
+                const label = b ? billTitle(b) : 'deleted bill';
                 return `<button class="chat-bill-chip" onclick="openBillFromChat(${bid})" title="Open this bill"><i class="fas fa-file-invoice-dollar"></i> ${bfEscapeHtml(label)}</button>`;
             });
         }
@@ -2987,13 +2991,13 @@
         function closeBillTagModal() { document.getElementById('billTagModal').classList.remove('active'); }
         function renderBillTagList() {
             const q = (document.getElementById('billTagSearch').value || '').toLowerCase();
-            const list = bills.filter(b => !q || b.name.toLowerCase().includes(q)).slice(0, 60);
+            const list = bills.filter(b => !q || billTitle(b).toLowerCase().includes(q) || b.name.toLowerCase().includes(q)).slice(0, 60);
             const el = document.getElementById('billTagList');
             el.innerHTML = list.length ? list.map(b => {
                 const occ = planOccurrence(b);
                 const when = (occ && occ.date) || b.dueDate;
                 return `<div class="setting-row" style="align-items:center;padding:10px 0;">
-                    <div class="setting-info"><h4 style="font-size:14px;">${bfEscapeHtml(b.name)}</h4><p>${formatCurrency(b.amount)}${when ? ' · due ' + formatDate(when) : ''}</p></div>
+                    <div class="setting-info"><h4 style="font-size:14px;">${bfEscapeHtml(billTitle(b))}</h4><p>${formatCurrency(b.amount)}${when ? ' · due ' + formatDate(when) : ''}</p></div>
                     <button class="btn btn-primary btn-sm" onclick="insertBillTag(${b.id})"><i class="fas fa-plus"></i> Tag</button>
                 </div>`;
             }).join('') : '<p style="color:var(--text-muted);font-size:13px;">No bills match.</p>';
@@ -3055,7 +3059,7 @@
                 return `<div class="catbill-row" onclick="closeCategoryBillsModal();editBill(${b.id})" title="Edit this bill">
                     <div class="bill-icon ${cfg.class}"><i class="fas ${cfg.icon}"></i></div>
                     <div style="flex:1;min-width:0;">
-                        <h4>${bfEscapeHtml(b.name)}</h4>
+                        <h4>${bfEscapeHtml(billTitle(b))}</h4>
                         <p>${when ? 'due ' + formatDate(when) : ''}${b.notes ? ' · 📝 notes' : ''}</p>
                     </div>
                     <span class="bill-status ${b.status}"><span class="bill-status-dot"></span>${stLabel}</span>
@@ -3295,14 +3299,14 @@
             const payEl = document.getElementById('planPayList');
             payEl.innerHTML = payRows.length ? payRows.map(r => {
                 const partial = r.alloc < r.owed - 0.005;
-                return `<div class="setting-row" style="align-items:center;"><div class="setting-info"><h4 style="font-size:14px;">${bfEscapeHtml(r.b.name)} <span style="color:var(--text-muted);font-weight:400;">· due ${formatDate(r.date || r.b.dueDate)}${overdueTag(r)}${schedTag(r)}</span></h4><p>Monthly payment ${formatCurrency(r.owed)}${balInfo(r.b)}${partial ? ` — <b style='color:var(--accent-amber);'>partial: ${formatCurrency(Math.max(0, r.owed - r.alloc))} of this month's payment still unplanned</b>` : ' — fully covered'}</p></div><div style="display:flex;gap:8px;align-items:center;"><input type="number" class="form-input" style="width:110px;" min="0" step="0.01" max="${r.owed}" value="${r.alloc}" onchange="planSetAlloc(${r.b.id}, this.value)"><button class="btn btn-secondary btn-sm" title="Wait until another paycheck" onclick="planSetAlloc(${r.b.id}, 0)"><i class="fas fa-xmark"></i></button></div></div>`;
+                return `<div class="setting-row" style="align-items:center;"><div class="setting-info"><h4 style="font-size:14px;">${bfEscapeHtml(billTitle(r.b))} <span style="color:var(--text-muted);font-weight:400;">· due ${formatDate(r.date || r.b.dueDate)}${overdueTag(r)}${schedTag(r)}</span></h4><p>Monthly payment ${formatCurrency(r.owed)}${balInfo(r.b)}${partial ? ` — <b style='color:var(--accent-amber);'>partial: ${formatCurrency(Math.max(0, r.owed - r.alloc))} of this month's payment still unplanned</b>` : ' — fully covered'}</p></div><div style="display:flex;gap:8px;align-items:center;"><input type="number" class="form-input" style="width:110px;" min="0" step="0.01" max="${r.owed}" value="${r.alloc}" onchange="planSetAlloc(${r.b.id}, this.value)"><button class="btn btn-secondary btn-sm" title="Wait until another paycheck" onclick="planSetAlloc(${r.b.id}, 0)"><i class="fas fa-xmark"></i></button></div></div>`;
             }).join('') : '<p style="color:var(--text-muted);font-size:13px;">Nothing planned yet — press <b>Auto plan</b> above, or add bills from the wait list below.</p>';
             const waitEl = document.getElementById('planWaitList');
-            waitEl.innerHTML = waitRows.length ? waitRows.map(r => `<div class="setting-row" style="align-items:center;"><div class="setting-info"><h4 style="font-size:14px;">${bfEscapeHtml(r.b.name)} <span style="color:var(--text-muted);font-weight:400;">· due ${formatDate(r.date || r.b.dueDate)}${overdueTag(r)}${schedTag(r)}</span></h4><p>Monthly payment ${formatCurrency(r.owed)}${balInfo(r.b)}</p></div><button class="btn btn-secondary btn-sm" onclick="planAllocateFull(${r.b.id})"><i class="fas fa-plus"></i> Pay with this paycheck</button></div>`).join('') : '<p style="color:var(--text-muted);font-size:13px;">Every bill due by this paycheck is either covered here or planned on another paycheck.</p>';
+            waitEl.innerHTML = waitRows.length ? waitRows.map(r => `<div class="setting-row" style="align-items:center;"><div class="setting-info"><h4 style="font-size:14px;">${bfEscapeHtml(billTitle(r.b))} <span style="color:var(--text-muted);font-weight:400;">· due ${formatDate(r.date || r.b.dueDate)}${overdueTag(r)}${schedTag(r)}</span></h4><p>Monthly payment ${formatCurrency(r.owed)}${balInfo(r.b)}</p></div><button class="btn btn-secondary btn-sm" onclick="planAllocateFull(${r.b.id})"><i class="fas fa-plus"></i> Pay with this paycheck</button></div>`).join('') : '<p style="color:var(--text-muted);font-size:13px;">Every bill due by this paycheck is either covered here or planned on another paycheck.</p>';
             const cutoff = p.date || new Date().toISOString().slice(0, 10);
             const next = bills.filter(b => b.dueDate && b.dueDate > cutoff && planBillOwes(b) && !planClaimedElsewhere(b.id, p.id) && p.allocations[String(b.id)] === undefined).sort((a, b2) => (a.dueDate < b2.dueDate ? -1 : 1)).slice(0, 8);
             const nextEl = document.getElementById('planNextList');
-            nextEl.innerHTML = next.length ? next.map(b => `<div class="setting-row" style="align-items:center;"><div class="setting-info"><h4 style="font-size:14px;">${bfEscapeHtml(b.name)}</h4><p>due ${formatDate(b.dueDate)} · monthly ${formatCurrency(planBillRemaining(b))}</p></div><div style="font-weight:600;">${formatCurrency(planBillRemaining(b))}</div></div>`).join('') : '<p style="color:var(--text-muted);font-size:13px;">No upcoming bills found.</p>';
+            nextEl.innerHTML = next.length ? next.map(b => `<div class="setting-row" style="align-items:center;"><div class="setting-info"><h4 style="font-size:14px;">${bfEscapeHtml(billTitle(b))}</h4><p>due ${formatDate(b.dueDate)} · monthly ${formatCurrency(planBillRemaining(b))}</p></div><div style="font-weight:600;">${formatCurrency(planBillRemaining(b))}</div></div>`).join('') : '<p style="color:var(--text-muted);font-size:13px;">No upcoming bills found.</p>';
         }
         function planRecordPayments() {
             if (planReadOnly()) { showToast('👁️ View-only access.', 'info'); return; }
@@ -3552,7 +3556,7 @@
             bankImportData.finalBalance = bankDetectFinalBalance(rowsFile);
             const rows = (bankImportData.normalizedRows || rowsFile).slice().sort((a, b) => (a.date < b.date ? -1 : 1));
             const inT = rows.reduce((s, r) => s + r.credit, 0), outT = rows.reduce((s, r) => s + r.debit, 0);
-            const autoLink = rows.filter(r => { const mk = descMatchKey(r.desc || r.note); return mk && bills.some(b => b.recurring && b.matchKey === mk); });
+            const autoLink = rows.filter(r => { const mk = descMatchKey(r.desc || r.note); return mk && bills.some(b => b.matchKey === mk); });
             const span = rows.length ? `${formatDate(rows[0].date)} → ${formatDate(rows[rows.length - 1].date)}` : '—';
             const cell = 'text-align:center;padding:10px;background:var(--bg-input);border-radius:var(--radius-sm);';
             document.getElementById('bankImportSummary').innerHTML = `<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
@@ -3562,7 +3566,7 @@
                 <div style="${cell}"><div style="font-size:11px;color:var(--text-muted);">Statement balance</div><div style="font-size:16px;font-weight:800;color:var(--accent-blue);">${bankImportData.finalBalance === null ? 'n/a' : formatCurrency(bankImportData.finalBalance)}</div></div></div>
                 <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0;">Span: ${span}. Credits become deposits, debits become bank transactions; duplicates and debits matching an existing bill payment are skipped.${autoLink.length ? ` <b style="color:var(--accent-blue);">${autoLink.length} row(s) will auto-pay existing bills.</b>` : ''}${bankImportData.finalBalance === null ? ' No Balance column — amounts apply on top of the current balance.' : ` Balance will be set to the statement balance (${formatCurrency(bankImportData.finalBalance)}${bankImportData.finalBalanceDate ? ', as of ' + formatDate(bankImportData.finalBalanceDate) : ''}).`}</p>`;
             const tail = rows.slice(-30).reverse();
-            document.getElementById('bankImportPreview').innerHTML = rows.length ? `<table class="bank-table"><thead><tr><th>Date</th><th>Description</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead><tbody>${tail.map(r => `<tr><td>${formatDate(r.date)}</td><td class="clip">${bfEscapeHtml(r.note)}${(() => { const mk = descMatchKey(r.desc || r.note); const mb = mk ? bills.find(b => b.recurring && b.matchKey === mk) : null; return mb ? ` <span style="color:var(--accent-blue);">→ ${bfEscapeHtml(mb.name)}</span>` : ''; })()}</td><td style="color:var(--accent-red);">${r.debit ? formatCurrency(r.debit) : ''}</td><td style="color:var(--accent-green);">${r.credit ? formatCurrency(r.credit) : ''}</td><td>${r.balance === null ? '' : formatCurrency(r.balance)}</td></tr>`).join('')}</tbody></table><p style="font-size:11px;color:var(--text-muted);margin:6px 0 0;">Showing the ${Math.min(30, rows.length)} most recent of ${rows.length} row(s).</p>` : '<p style="color:var(--accent-red);font-size:13px;">No rows with a valid date and amount were found — check the column mapping above.</p>';
+            document.getElementById('bankImportPreview').innerHTML = rows.length ? `<table class="bank-table"><thead><tr><th>Date</th><th>Description</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead><tbody>${tail.map(r => `<tr><td>${formatDate(r.date)}</td><td class="clip">${bfEscapeHtml(r.note)}${(() => { const mk = descMatchKey(r.desc || r.note); const mb = mk ? bills.find(b => b.matchKey === mk) : null; return mb ? ` <span style="color:var(--accent-blue);">→ ${bfEscapeHtml(billTitle(mb))}</span>` : ''; })()}</td><td style="color:var(--accent-red);">${r.debit ? formatCurrency(r.debit) : ''}</td><td style="color:var(--accent-green);">${r.credit ? formatCurrency(r.credit) : ''}</td><td>${r.balance === null ? '' : formatCurrency(r.balance)}</td></tr>`).join('')}</tbody></table><p style="font-size:11px;color:var(--text-muted);margin:6px 0 0;">Showing the ${Math.min(30, rows.length)} most recent of ${rows.length} row(s).</p>` : '<p style="color:var(--accent-red);font-size:13px;">No rows with a valid date and amount were found — check the column mapping above.</p>';
         }
         function applyBankImport() {
             if (viewOnlyMode()) { showToast('👁️ View-only access.', 'info'); return; }
@@ -3577,7 +3581,7 @@
                 if (r.credit > 0) { if (dup(acc.deposits, r, r.credit)) { skipped++; return; } acc.deposits.push({ date: r.date, amount: r.credit, note: r.note }); nIn++; inT += r.credit; }
                 else if (r.debit > 0) {
                     const mk = descMatchKey(r.desc || '');
-                    const mb = mk ? bills.find(b => b.recurring && b.matchKey === mk) : null;
+                    const mb = mk ? bills.find(b => b.matchKey === mk) : null;
                     if (mb) {
                         if (billMatch(r)) { skipped++; return; }
                         recordTaggedPayment(mb, { date: r.date, amount: r.debit, note: r.note }, acc);
@@ -3605,6 +3609,7 @@
         let tagRowIndex = null;
         let tagMode = 'new';
         let tagAccId = null;
+        let tagRawName = '';   // raw bank description kept as the bill's name
         function openTagBillModal(idx) {
             const r = (currentActivityRows || [])[idx];
             if (!r || r.type !== 'out') return;
@@ -3615,14 +3620,14 @@
             document.getElementById('tagBillAmount').textContent = formatCurrency(r.amount);
             const mk = r.matchKey || descMatchKey(r.note || r.label);
             document.getElementById('tagBillMatchKey').textContent = mk ? `"${mk}"` : '(description)';
-            const cleanName = String(r.label || '').replace(/^#\S+\s*·\s*/, '').trim();
-            document.getElementById('tagNewName').value = cleanName.slice(0, 60);
+            tagRawName = String(r.label || '').replace(/^#\S+\s*·\s*/, '').trim();
+            document.getElementById('tagNewName').value = '';
             document.getElementById('tagNewAmount').value = r.amount;
             document.getElementById('tagNewCategory').innerHTML = Object.entries(categoryConfig).map(([k, c]) => `<option value="${k}">${bfEscapeHtml(c.label)}</option>`).join('');
             document.getElementById('tagNewCategory').value = 'other';
             document.getElementById('tagNewRecurring').classList.add('active');
             const sel = document.getElementById('tagExistSelect');
-            sel.innerHTML = bills.slice().sort((a, b) => a.name.localeCompare(b.name)).map(b => `<option value="${b.id}">${bfEscapeHtml(b.name)} (${formatCurrency(planBillRemaining(b))}/mo)</option>`).join('');
+            sel.innerHTML = bills.slice().sort((a, b) => billTitle(a).localeCompare(billTitle(b))).map(b => `<option value="${b.id}">${bfEscapeHtml(billTitle(b))} (${formatCurrency(planBillRemaining(b))}/mo)</option>`).join('');
             setTagMode('new', document.getElementById('tagModeNewBtn'));
             document.getElementById('tagBillModal').classList.add('active');
         }
@@ -3644,19 +3649,20 @@
                 if (!bill) { showToast('Choose a bill.', 'error'); return; }
                 recordTaggedPayment(bill, r, acc);
                 if (!bill.matchKey) bill.matchKey = mk;
-                msg = `Payment recorded on "${bill.name}".`;
+                msg = `Payment recorded on "${billTitle(bill)}".`;
             } else {
-                const name = document.getElementById('tagNewName').value.trim();
+                const title = document.getElementById('tagNewName').value.trim();
+                const name = tagRawName;
                 const amt = parseFloat(document.getElementById('tagNewAmount').value);
-                if (!name) { showToast('Give the bill a name.', 'error'); return; }
+                if (!title) { showToast('Give the bill a title.', 'error'); return; }
                 if (!amt || amt <= 0) { showToast('Enter a valid amount.', 'error'); return; }
                 const category = document.getElementById('tagNewCategory').value;
                 const recurring = document.getElementById('tagNewRecurring').classList.contains('active');
                 const id = bills.length ? Math.max(...bills.map(b => b.id)) + 1 : 1;
-                const bill = { id: id, name: name, amount: amt, dueDate: r.date, category: category, status: 'paid', recurring: recurring, isPayoff: false, totalOwed: 0, paidAmount: 0, payments: [], interestRate: 0, interestRateType: 'annual', notes: '', preferredAccountId: acc.id, matchKey: mk };
+                const bill = { id: id, name: name, title: title, amount: amt, dueDate: r.date, category: category, status: 'paid', recurring: recurring, isPayoff: false, totalOwed: 0, paidAmount: 0, payments: [], interestRate: 0, interestRateType: 'annual', notes: '', preferredAccountId: acc.id, matchKey: mk };
                 recordTaggedPayment(bill, r, acc);
                 bills.push(bill);
-                msg = `"${name}" created — future imports with this description will be matched automatically.`;
+                msg = `"${title}" created — future imports with this description will be matched automatically.`;
             }
             acc.debits = (acc.debits || []).filter(d => !(d.date === r.date && Math.abs((d.amount || 0) - r.amount) < 0.005 && (d.note || '') === (r.note || '')));
             saveData(); closeTagBillModal(); renderAll();
@@ -3746,7 +3752,7 @@
             return `<div class="bill-row">
                 <div class="bill-icon ${cat.class}"><i class="fas ${cat.icon}"></i></div>
                 <div class="bill-info">
-                    <h4>${bill.name} ${statusBadge}</h4>
+                    <h4>${billTitle(bill)} ${statusBadge}</h4>
                     <p><span class="category-tag ${bill.category}">${cat.label}</span></p>
                     <div class="payoff-progress-wrap">
                         <div class="payoff-labels">
@@ -3897,7 +3903,7 @@
                                 <i class="fas ${cat.icon}" style="color:${colorMap[cat.color]};font-size:14px;"></i>
                             </div>
                             <div>
-                                <h4 style="font-size:14px;font-weight:700;">${b.name}</h4>
+                                <h4 style="font-size:14px;font-weight:700;">${bfEscapeHtml(billTitle(b))}</h4>
                                 <p style="font-size:11px;color:var(--text-muted);">${formatCurrency(b.amount)}/mo</p>
                             </div>
                         </div>
