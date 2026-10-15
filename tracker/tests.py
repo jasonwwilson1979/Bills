@@ -704,7 +704,9 @@ class TemplateScriptTests(TestCase):
                        'name,title,amount', 'name: name, title: title',
                        'let tagRawName', "tagNewName').value = ''",
                        "h=['Name','Title','Amount'",
-                       'b.matchKey === mk', 'bills.find(b => b.matchKey === mk)'):
+                       'function bfBillForRow(',
+                       'const explicit = bills.find(b => b.matchKey && b.matchKey === mk);',
+                       "descMatchKey(b.name || '') === mk"):
             self.assertIn(needle, html)
         # Title used across the board: bill rows, calendar, savings, debts,
         # plan lists, payment modals, chips, pickers...
@@ -777,6 +779,34 @@ class TemplateScriptTests(TestCase):
         self.assertIn("if (on.classList.contains('active')) off.classList.remove('active');", html)
         # The form's yearly toggle is reset when adding a new bill.
         self.assertIn("document.getElementById('recurringYearlyToggle').classList.remove('active')", html)
+
+    def test_bank_import_matches_bills_by_raw_description(self):
+        """Bank imports auto-link rows to bills using the bill's RAW bank
+        description / identifier (its Name) — never the friendly Title — with
+        an opt-in unique-substring fallback, and the preview shows which bill
+        each row will auto-pay before importing."""
+        from django.conf import settings
+
+        path = os.path.join(str(settings.BASE_DIR), 'templates', 'tracker', 'app.html')
+        with open(path, encoding='utf-8') as fh:
+            html = fh.read()
+        for needle in ('function bfBillForRow(', 'function bankLooseMatchEnabled(',
+                       'id="bankLooseMatch"', 'onchange="bankUpdatePreview()"',
+                       "const explicit = bills.find(b => b.matchKey && b.matchKey === mk);",
+                       "const exact = bills.find(b => descMatchKey(b.name || '') === mk);",
+                       'nk.length >= 5 && mk.indexOf(nk) !== -1',
+                       'function bfDropSupersededDebit(',
+                       'if (loose) loose.checked = true;',
+                       'bfDropSupersededDebit(acc, r, claimedDeb, addedDeb);',
+                       'return cands.length === 1 ? cands[0] : null;'):
+            self.assertIn(needle, html)
+        self.assertEqual(html.count('bfDropSupersededDebit(acc, r, claimedDeb, addedDeb);'), 2)
+        # Import, the preview count and the per-row preview annotation all use
+        # the same resolver (so the preview cannot disagree with the import).
+        self.assertEqual(html.count('bfBillForRow(r.desc, r.note, bankLooseMatchEnabled())'), 3)
+        # The old match-signature-only lookup is gone everywhere.
+        self.assertNotIn('bills.find(b => b.matchKey === mk)', html)
+        self.assertNotIn('bills.some(b => b.matchKey === mk)', html)
 
 
 class TemplateStructureTests(TestCase):

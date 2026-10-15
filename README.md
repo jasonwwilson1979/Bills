@@ -71,6 +71,15 @@ Notes:
   again), the paycheck planner rolls it forward a full year at a time, the
   monthly summary cards only count it in its own month, and the CSV
   Recurring column round-trips `Monthly` / `Yearly` / `No`.
+- **Bank imports auto-link to bills by raw bank description.** Matching uses the
+  bill's **Name** (the raw bank description / identifier, e.g.
+  `PURCHASE-SIG CARMAX 1234`) — never the Title. Descriptions are compared as
+  letters-only signatures so reference numbers, dates and amounts don't break
+  the match, and the import preview labels every row that will auto-pay a bill
+  (`→ Car Payment`) before you import. An opt-in checkbox additionally matches
+  when a bill's name appears inside the description (unique match, 5+ letters),
+  so a bill named `Netflix` catches `NETFLIX.COM 866-579-7172`. Explicit
+  signatures set by "Tag as bill" always take precedence.
 - First sign-in seeds the same sample bills the original app used, so you can
   explore immediately; "Clear Data" in Settings empties your account.
 - **Backup & Restore** in Settings downloads your entire page (bills, accounts,

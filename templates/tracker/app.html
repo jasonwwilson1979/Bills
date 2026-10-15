@@ -1135,10 +1135,14 @@
                     <label class="form-label">Bank statement (CSV)</label>
                     <input type="file" class="form-input" id="bankImportFile" accept=".csv,text/csv" onchange="handleBankFileSelect(this)">
                 </div>
-                <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 14px;">Re-importing is safe — rows already in this account are <b>updated in place</b> (posted amounts/descriptions win) and only new rows are added. To start the account over, use <b>Clear transactions</b> in its activity view.</p>
+                <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 14px;">Re-importing is safe — rows already in this account are <b>updated in place</b> (posted amounts/descriptions win) and only new rows are added. Debits whose bank description matches a bill's <b>Name</b> (the raw bank description / identifier saved on that bill) are auto-paid onto that bill — no manual tagging needed. To start the account over, use <b>Clear transactions</b> in its activity view.</p>
                 <div id="bankImportSetup" style="display:none;">
                     <h3 class="settings-section-title">Column mapping</h3>
                     <div id="bankMappingFields" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;"></div>
+                    <label style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px;color:var(--text-secondary);margin-top:14px;cursor:pointer;">
+                        <input type="checkbox" id="bankLooseMatch" checked onchange="bankUpdatePreview()" style="accent-color:var(--accent-blue);width:15px;height:15px;margin-top:2px;flex-shrink:0;">
+                        <span>Also auto-pay a bill when its name appears inside the bank description (unique match, 5+ letters) — e.g. a bill named <b>Netflix</b> catching "NETFLIX.COM 866-579-7172". Bills whose <b>Name</b> is the bank description itself always match, with or without this.</span>
+                    </label>
                     <div id="bankImportSummary" style="margin:14px 0;"></div>
                     <div id="bankImportPreview"></div>
                 </div>
@@ -3596,6 +3600,10 @@
             document.getElementById('bankImportBtn').style.display = 'none';
             document.getElementById('bankImportSummary').innerHTML = '';
             document.getElementById('bankImportPreview').innerHTML = '';
+            // Auto-matching by raw bank description is on by default for every
+            // import; untick it in the dialog for a conservative import.
+            const loose = document.getElementById('bankLooseMatch');
+            if (loose) loose.checked = true;
             document.getElementById('bankImportModal').classList.add('active');
         }
         function closeBankImportModal() { document.getElementById('bankImportModal').classList.remove('active'); bankImportAccId = null; bankImportData = null; }
@@ -3699,7 +3707,7 @@
             bankImportData.finalBalance = bankDetectFinalBalance(rowsFile);
             const rows = (bankImportData.normalizedRows || rowsFile).slice().sort((a, b) => (a.date < b.date ? -1 : 1));
             const inT = rows.reduce((s, r) => s + r.credit, 0), outT = rows.reduce((s, r) => s + r.debit, 0);
-            const autoLink = rows.filter(r => { const mk = descMatchKey(r.desc || r.note); return mk && bills.some(b => b.matchKey === mk); });
+            const autoLink = rows.filter(r => bfBillForRow(r.desc, r.note, bankLooseMatchEnabled()));
             const span = rows.length ? `${formatDate(rows[0].date)} → ${formatDate(rows[rows.length - 1].date)}` : '—';
             const cell = 'text-align:center;padding:10px;background:var(--bg-input);border-radius:var(--radius-sm);';
             document.getElementById('bankImportSummary').innerHTML = `<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
@@ -3707,9 +3715,9 @@
                 <div style="${cell}"><div style="font-size:11px;color:var(--text-muted);">Credits (in)</div><div style="font-size:16px;font-weight:800;color:var(--accent-green);">+${formatCurrency(inT)}</div></div>
                 <div style="${cell}"><div style="font-size:11px;color:var(--text-muted);">Debits (out)</div><div style="font-size:16px;font-weight:800;color:var(--accent-red);">-${formatCurrency(outT)}</div></div>
                 <div style="${cell}"><div style="font-size:11px;color:var(--text-muted);">Statement balance</div><div style="font-size:16px;font-weight:800;color:var(--accent-blue);">${bankImportData.finalBalance === null ? 'n/a' : formatCurrency(bankImportData.finalBalance)}</div></div></div>
-                <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0;">Span: ${span}. Credits become deposits, debits become bank transactions; rows already in the account are updated in place (posted amount/description wins), new rows are added, and debits matching an existing bill payment are skipped.${autoLink.length ? ` <b style="color:var(--accent-blue);">${autoLink.length} row(s) will auto-pay existing bills.</b>` : ''}${bankImportData.finalBalance === null ? ' No Balance column — amounts apply on top of the current balance.' : ` Balance will be set to the statement balance (${formatCurrency(bankImportData.finalBalance)}${bankImportData.finalBalanceDate ? ', as of ' + formatDate(bankImportData.finalBalanceDate) : ''}).`}</p>`;
+                <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0;">Span: ${span}. Credits become deposits, debits become bank transactions; rows already in the account are updated in place (posted amount/description wins), new rows are added, and debits matching an existing bill payment are skipped.${autoLink.length ? ` <b style="color:var(--accent-blue);">${autoLink.length} row(s) will auto-pay a bill</b> — matched on the bill's raw bank description (its Name), shown as “→ bill” below.` : ''}${bankImportData.finalBalance === null ? ' No Balance column — amounts apply on top of the current balance.' : ` Balance will be set to the statement balance (${formatCurrency(bankImportData.finalBalance)}${bankImportData.finalBalanceDate ? ', as of ' + formatDate(bankImportData.finalBalanceDate) : ''}).`}</p>`;
             const tail = rows.slice(-30).reverse();
-            document.getElementById('bankImportPreview').innerHTML = rows.length ? `<table class="bank-table"><thead><tr><th>Date</th><th>Description</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead><tbody>${tail.map(r => `<tr><td>${formatDate(r.date)}</td><td class="clip">${bfEscapeHtml(r.note)}${(() => { const mk = descMatchKey(r.desc || r.note); const mb = mk ? bills.find(b => b.matchKey === mk) : null; return mb ? ` <span style="color:var(--accent-blue);">→ ${bfEscapeHtml(billTitle(mb))}</span>` : ''; })()}</td><td style="color:var(--accent-red);">${r.debit ? formatCurrency(r.debit) : ''}</td><td style="color:var(--accent-green);">${r.credit ? formatCurrency(r.credit) : ''}</td><td>${r.balance === null ? '' : formatCurrency(r.balance)}</td></tr>`).join('')}</tbody></table><p style="font-size:11px;color:var(--text-muted);margin:6px 0 0;">Showing the ${Math.min(30, rows.length)} most recent of ${rows.length} row(s).</p>` : '<p style="color:var(--accent-red);font-size:13px;">No rows with a valid date and amount were found — check the column mapping above.</p>';
+            document.getElementById('bankImportPreview').innerHTML = rows.length ? `<table class="bank-table"><thead><tr><th>Date</th><th>Description</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead><tbody>${tail.map(r => `<tr><td>${formatDate(r.date)}</td><td class="clip">${bfEscapeHtml(r.note)}${(() => { const mb = bfBillForRow(r.desc, r.note, bankLooseMatchEnabled()); return mb ? ` <span style="color:var(--accent-blue);">→ ${bfEscapeHtml(billTitle(mb))}</span>` : ''; })()}</td><td style="color:var(--accent-red);">${r.debit ? formatCurrency(r.debit) : ''}</td><td style="color:var(--accent-green);">${r.credit ? formatCurrency(r.credit) : ''}</td><td>${r.balance === null ? '' : formatCurrency(r.balance)}</td></tr>`).join('')}</tbody></table><p style="font-size:11px;color:var(--text-muted);margin:6px 0 0;">Showing the ${Math.min(30, rows.length)} most recent of ${rows.length} row(s).</p>` : '<p style="color:var(--accent-red);font-size:13px;">No rows with a valid date and amount were found — check the column mapping above.</p>';
         }
         function applyBankImport() {
             if (viewOnlyMode()) { showToast('👁️ View-only access.', 'info'); return; }
@@ -3743,8 +3751,8 @@
                     const nd = { date: r.date, amount: r.credit, note: r.note };
                     acc.deposits.push(nd); addedDep.add(nd); nIn++; inT += r.credit;
                 } else if (r.debit > 0) {
-                    const mk = descMatchKey(r.desc || '');
-                    const mb = mk ? bills.find(b => b.matchKey === mk) : null;
+                    // Auto-link by the bill's raw bank description (its Name)
+                    const mb = bfBillForRow(r.desc, r.note, bankLooseMatchEnabled());
                     if (mb) {
                         mb.payments = mb.payments || [];
                         const pay = mb.payments.find(p => !claimedPay.has(p) && p.accountId === acc.id && p.date === r.date && (p.note || '') === r.note)
@@ -3753,10 +3761,12 @@
                             claimedPay.add(pay);
                             if (Math.abs((pay.amount || 0) - r.debit) >= 0.005) { pay.amount = r.debit; if (pay.note) pay.note = r.note; nUpd++; }
                             else nSkip++;
+                            bfDropSupersededDebit(acc, r, claimedDeb, addedDeb);
                             return;
                         }
                         if (payOnAcct(r, r.debit)) { nSkip++; return; }
                         claimedPay.add(recordTaggedPayment(mb, { date: r.date, amount: r.debit, note: r.note }, acc));
+                        bfDropSupersededDebit(acc, r, claimedDeb, addedDeb);
                         nBills++; return;
                     }
                     const m = acc.debits.find(d => !claimedDeb.has(d) && !addedDeb.has(d) && d.date === r.date && (d.note || '') === r.note)
@@ -3782,6 +3792,45 @@
         // ============ ACTIVITY SEARCH + TAG AS BILL ============
         function activitySearchChanged(v) { activitySearch = v || ''; activitySelected.clear(); renderWithdrawalsList(); }
         function descMatchKey(s) { return String(s || '').toLowerCase().replace(/[^a-z]/g, ''); }
+        // Auto-link an imported bank row to a bill. Matching is driven by the
+        // bill's RAW bank description / identifier (its Name — e.g.
+        // "PURCHASE-SIG CARMAX 1234"), never the friendly Title. Descriptions
+        // are reduced to their letters-only signature, so reference numbers,
+        // dates and amounts in the bank text cannot break a match.
+        // Precedence: 1) the explicit signature set by "Tag as bill",
+        // 2) a bill whose Name has the same signature,
+        // 3) (opt-in) exactly one bill whose Name (5+ letters) appears inside
+        //    the description — e.g. a bill named "Netflix" catching
+        //    "NETFLIX.COM 866-579-7172".
+        function bfBillForRow(desc, note, loose) {
+            const mk = descMatchKey(desc || note || '');
+            if (!mk) return null;
+            const explicit = bills.find(b => b.matchKey && b.matchKey === mk);
+            if (explicit) return explicit;
+            const exact = bills.find(b => descMatchKey(b.name || '') === mk);
+            if (exact) return exact;
+            if (!loose) return null;
+            const cands = bills.filter(b => { const nk = descMatchKey(b.name || ''); return nk.length >= 5 && mk.indexOf(nk) !== -1; });
+            return cands.length === 1 ? cands[0] : null;
+        }
+        function bankLooseMatchEnabled() {
+            const el = document.getElementById('bankLooseMatch');
+            return !!(el && el.checked);
+        }
+        // A row that now auto-pays a bill may previously have been imported as
+        // a plain bank transaction (matching was off, or the bill did not exist
+        // yet). Drop that superseded entry so the money is not shown twice —
+        // the recorded bill payment replaces it. The account balance is left
+        // alone: it already reflects the money leaving the account.
+        function bfDropSupersededDebit(acc, r, claimedDeb, addedDeb) {
+            const debits = acc.debits || [];
+            const idx = debits.findIndex(d => !addedDeb.has(d) && !claimedDeb.has(d)
+                && d.date === r.date && Math.abs((d.amount || 0) - r.debit) < 0.005
+                && ((d.note || '') === r.note || descMatchKey(d.note || '') === descMatchKey(r.note || '')));
+            if (idx === -1) return;
+            claimedDeb.add(debits[idx]);
+            debits.splice(idx, 1);
+        }
         function recordTaggedPayment(bill, r, acc) {
             bill.payments = bill.payments || [];
             const p = { date: r.date, amount: r.amount, note: r.note || 'Bank transaction', accountId: acc.id };
