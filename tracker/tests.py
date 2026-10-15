@@ -743,6 +743,39 @@ class TemplateScriptTests(TestCase):
         self.assertIn("r._bill.status = 'pending'", html)
         self.assertIn("b.status = 'pending'", html)
 
+    def test_yearly_recurring_toggle_exists(self):
+        """Bills can recur yearly (same month each year) as well as monthly.
+        The two form toggles are mutually exclusive, and the yearly flag
+        drives month views, per-occurrence statuses, the paycheck planner,
+        CSV export/import and the bank-import auto-tag flow."""
+        from django.conf import settings
+
+        path = os.path.join(str(settings.BASE_DIR), 'templates', 'tracker', 'app.html')
+        with open(path, encoding='utf-8') as fh:
+            html = fh.read()
+        for needle in ('id="recurringYearlyToggle"', 'id="tagNewYearly"',
+                       'Recurring yearly bill',
+                       "onclick=\"billRecurringMode('monthly')\"",
+                       "onclick=\"billRecurringMode('yearly')\"",
+                       "onclick=\"tagRecurringMode('monthly')\"",
+                       "onclick=\"tagRecurringMode('yearly')\"",
+                       'function billRecurringMode(', 'function tagRecurringMode(',
+                       'function setRecurringMode(', 'function billIsYearly(',
+                       'function bfBillDueInMonth(', 'function bfMonthlyRecurringTotal(',
+                       'function bfYearlyTotalForMonth(',
+                       'recurring,yearly,isPayoff',
+                       'recurring: !!r.recurring, yearly: !!r.yearly',
+                       "b.recurring?(b.yearly?'Yearly':'Monthly'):'No'",
+                       'bfYearlyTotalForMonth(d.getMonth())',
+                       "yearly=recurring&&document.getElementById('recurringYearlyToggle')",
+                       'const yearly = !!b.yearly;',
+                       'if (b.yearly) return billMonth === m && billYear <= y;'):
+            self.assertIn(needle, html)
+        # Mutual exclusion: turning one toggle on clears the other.
+        self.assertIn("if (on.classList.contains('active')) off.classList.remove('active');", html)
+        # The form's yearly toggle is reset when adding a new bill.
+        self.assertIn("document.getElementById('recurringYearlyToggle').classList.remove('active')", html)
+
 
 class TemplateStructureTests(TestCase):
     """Parses the *rendered* app page with html.parser (script bodies are

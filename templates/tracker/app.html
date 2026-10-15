@@ -1011,7 +1011,8 @@
                         <p class="form-hint" id="interestRateHint">Annual Percentage Rate — divided by 12 for monthly interest charge</p>
                     </div>
                 </div>
-                <div class="form-group"><div class="toggle-group"><div class="toggle active" id="recurringToggle" onclick="this.classList.toggle('active')"></div><span class="toggle-label">Recurring monthly bill</span></div><p class="form-hint">This bill will repeat every month automatically</p></div>
+                <div class="form-group"><div class="toggle-group"><div class="toggle active" id="recurringToggle" onclick="billRecurringMode('monthly')"></div><span class="toggle-label">Recurring monthly bill</span></div><p class="form-hint">This bill will repeat every month automatically</p></div>
+                <div class="form-group"><div class="toggle-group"><div class="toggle" id="recurringYearlyToggle" onclick="billRecurringMode('yearly')"></div><span class="toggle-label">Recurring yearly bill</span></div><p class="form-hint">Repeats once a year, in the same month — e.g. annual insurance or taxes. Only one recurring option can be on at a time.</p></div>
                 <div class="form-group"><label class="form-label">Default Payment Account (optional)</label><select class="form-select" id="billPreferredAccount"><option value="">No preference — choose at payment time</option></select><p class="form-hint">Auto-select this account when making payments</p></div>
                 <div class="form-group" style="margin-bottom:0;">
                     <label class="form-label">Notes <span style="font-size:11px;color:var(--text-muted);font-weight:400;">optional — formatting, links &amp; colors</span></label>
@@ -1168,7 +1169,8 @@
                         <div class="form-group"><label class="form-label">Amount ($/mo)</label><input type="number" class="form-input" id="tagNewAmount" step="0.01" min="0"></div>
                         <div class="form-group"><label class="form-label">Category</label><select class="form-select" id="tagNewCategory"></select></div>
                     </div>
-                    <div class="toggle-group" style="margin-bottom:10px;"><div class="toggle active" id="tagNewRecurring" onclick="this.classList.toggle('active')"></div><span class="toggle-label">Recurring — watch for it on future imports</span></div>
+                    <div class="toggle-group" style="margin-bottom:10px;"><div class="toggle active" id="tagNewRecurring" onclick="tagRecurringMode('monthly')"></div><span class="toggle-label">Recurring monthly — watch for it on future imports</span></div>
+                    <div class="toggle-group" style="margin-bottom:10px;"><div class="toggle" id="tagNewYearly" onclick="tagRecurringMode('yearly')"></div><span class="toggle-label">Recurring yearly — same month each year</span></div>
                 </div>
                 <div id="tagExistPanel" style="display:none;">
                     <div class="form-group"><label class="form-label">Choose bill</label><select class="form-select" id="tagExistSelect"></select></div>
@@ -1625,8 +1627,10 @@
 
         function updateStats() {
             const total=bills.reduce((s,b)=>s+b.amount,0);
-            const paid=bills.filter(b=>b.status==='paid').reduce((s,b)=>s+b.amount,0);
-            const pending=bills.filter(b=>b.status!=='paid').reduce((s,b)=>s+b.amount,0);
+            // Monthly summaries: a yearly bill only counts in its own month.
+            const nowMonth=new Date().getMonth();
+            const paid=bills.filter(b=>b.status==='paid'&&bfBillDueInMonth(b,nowMonth)).reduce((s,b)=>s+b.amount,0);
+            const pending=bills.filter(b=>b.status!=='paid'&&bfBillDueInMonth(b,nowMonth)).reduce((s,b)=>s+b.amount,0);
             const debt=bills.filter(b=>b.isPayoff).reduce((s,b)=>s+Math.max(0,b.totalOwed-b.paidAmount),0);
             document.getElementById('totalBills').textContent=formatCurrency(total);
             document.getElementById('paidBills').textContent=formatCurrency(paid);
@@ -1634,7 +1638,7 @@
             document.getElementById('remainingDebt').textContent=formatCurrency(debt);
             document.getElementById('donutTotal').textContent=formatCurrency(total);
         }
-        function updateBadge() { document.getElementById('pendingBadge').textContent=bills.filter(b=>b.status!=='paid').length; }
+        function updateBadge() { const nowMonth=new Date().getMonth(); document.getElementById('pendingBadge').textContent=bills.filter(b=>b.status!=='paid'&&bfBillDueInMonth(b,nowMonth)).length; }
 
         function getPayoffHTML(bill) {
             if(!bill.isPayoff) return '';
@@ -1658,8 +1662,8 @@
             return `<div class="bill-row${sel?' selected':''}" data-bid="${bill.id}">
                 <input type="checkbox" class="bill-checkbox" ${sel?'checked':''} onclick="event.stopPropagation();toggleBillSelection(${bill.id})" title="Select for bulk payment">
                 <div class="bill-icon ${cat.class}"><i class="fas ${cat.icon}"></i></div>
-                <div class="bill-info"><h4>${billTitle(bill)}${bill.recurring?'<span class="recurring-badge"><i class="fas fa-redo"></i> Monthly</span>':''}</h4><p><span class="category-tag ${bill.category}">${cat.label}</span> <span class="bill-status ${st}"><span class="bill-status-dot"></span>${stLabel}</span></p>${getPayoffHTML(bill)}</div>
-                <div class="bill-amount">${isPayoff?`${formatCurrency(bill.amount)}<div style="font-size:11px;color:var(--text-muted);font-weight:500;">/mo</div>`:formatCurrency(bill.amount)}</div>
+                <div class="bill-info"><h4>${billTitle(bill)}${bill.recurring?`<span class="recurring-badge"><i class="fas fa-redo"></i> ${bill.yearly?'Yearly':'Monthly'}</span>`:''}</h4><p><span class="category-tag ${bill.category}">${cat.label}</span> <span class="bill-status ${st}"><span class="bill-status-dot"></span>${stLabel}</span></p>${getPayoffHTML(bill)}</div>
+                <div class="bill-amount">${isPayoff?`${formatCurrency(bill.amount)}<div style="font-size:11px;color:var(--text-muted);font-weight:500;">/mo</div>`:(bill.yearly?`${formatCurrency(bill.amount)}<div style="font-size:11px;color:var(--text-muted);font-weight:500;">/yr</div>`:formatCurrency(bill.amount))}</div>
                 <div class="bill-date">${formatDate(getProjectedDueDate(bill))}</div>
                 <div class="bill-actions">
                     ${bill.notes?`<button class="action-btn note" onclick="toggleBillNotes(${bill.id})" title="Notes"><i class="fas fa-note-sticky"></i></button>`:''}
@@ -1735,6 +1739,36 @@
             renderAllBills();
         }
 
+        // ===== RECURRENCE (monthly vs yearly) =====
+        // A bill is 'recurring' when it repeats at all; the 'yearly' flag
+        // selects the cadence: once a year, in the month of its due date.
+        // Legacy bills carry no 'yearly' flag and behave as before (monthly).
+        // The form's two toggles are mutually exclusive (only one at a time).
+        function billIsYearly(b) { return !!(b && b.recurring && b.yearly); }
+        function setRecurringMode(monthlyId, yearlyId, mode) {
+            const m = document.getElementById(monthlyId), y = document.getElementById(yearlyId);
+            if (!m || !y) return;
+            const on = mode === 'yearly' ? y : m, off = mode === 'yearly' ? m : y;
+            on.classList.toggle('active');
+            if (on.classList.contains('active')) off.classList.remove('active');
+        }
+        function billRecurringMode(mode) { setRecurringMode('recurringToggle', 'recurringYearlyToggle', mode); }
+        function tagRecurringMode(mode) { setRecurringMode('tagNewRecurring', 'tagNewYearly', mode); }
+        // True when the bill's occurrence falls in the given month index
+        // (yearly bills only occur in their own month; everything else counts).
+        function bfBillDueInMonth(b, monthIndex) {
+            if (!billIsYearly(b)) return true;
+            const d = new Date(b.dueDate + 'T00:00:00');
+            return !isNaN(d.getTime()) && d.getMonth() === monthIndex;
+        }
+        function bfMonthlyRecurringTotal() {
+            return bills.filter(b => b.recurring && !b.yearly).reduce((s, b) => s + (b.amount || 0), 0);
+        }
+        function bfYearlyTotalForMonth(monthIndex) {
+            return bills.filter(b => b.recurring && b.yearly && b.dueDate && new Date(b.dueDate + 'T00:00:00').getMonth() === monthIndex)
+                .reduce((s, b) => s + (b.amount || 0), 0);
+        }
+
         function getBillsForViewMonth() {
             const m = billsViewDate.getMonth();
             const y = billsViewDate.getFullYear();
@@ -1744,6 +1778,9 @@
                 const billYear = d.getFullYear();
 
                 if (b.recurring) {
+                    // Yearly bills only occur in their own month, once a year,
+                    // from their start date onward.
+                    if (b.yearly) return billMonth === m && billYear <= y;
                     return billYear < y || (billYear === y && billMonth <= m);
                 }
                 return billMonth === m && billYear === y;
@@ -1757,8 +1794,15 @@
         function getProjectedDueDate(bill) {
             if (!bill.recurring) return bill.dueDate;
             const origDate = new Date(bill.dueDate + 'T00:00:00');
+            if (isNaN(origDate.getTime())) return bill.dueDate;
             let day = origDate.getDate();
             const viewDate = new Date(billsViewDate.getFullYear(), billsViewDate.getMonth(), 1);
+            if (bill.yearly && origDate.getMonth() !== viewDate.getMonth()) {
+                // Yearly bill viewed outside its month: show the next anniversary.
+                const now = new Date();
+                const y = now.getMonth() > origDate.getMonth() ? now.getFullYear() + 1 : now.getFullYear();
+                return bfIsoDate(new Date(y, origDate.getMonth(), Math.min(day, new Date(y, origDate.getMonth() + 1, 0).getDate())));
+            }
             const lastDayOfMonth = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0).getDate();
             day = Math.min(day, lastDayOfMonth);
             viewDate.setDate(day);
@@ -1766,12 +1810,18 @@
         }
 
         // Effective status of a bill's occurrence in a given month. Recurring
-        // bills repeat monthly but their status is stored per bill, so without
-        // this a bill paid in October would still read "paid" in November.
+        // bills repeat monthly (or yearly, in their own month) but their status
+        // is stored per bill, so without this a bill paid in October would
+        // still read "paid" in November.
         // A month counts as paid when a payment was recorded during it; future
         // months with no payment yet read as "scheduled".
         function billMonthStatus(b, y, m) {
             if (!b.recurring) return b.status;
+            if (b.yearly) {
+                // Yearly bills have no occurrence outside their own month.
+                const od = new Date(b.dueDate + 'T00:00:00');
+                if (!isNaN(od.getTime()) && od.getMonth() !== m) return 'paid';
+            }
             const paidHere = (b.payments || []).some(p => {
                 if (!p || !p.date) return false;
                 const d = new Date(p.date + 'T00:00:00');
@@ -1792,18 +1842,25 @@
 
         // The occurrence of a bill the current planning cycle cares about:
         // its due date, or — for a recurring bill already paid — the first
-        // later month without a recorded payment (clamped to short months).
+        // later occurrence (next month, or next year for yearly bills)
+        // without a recorded payment (clamped to short months).
         function planOccurrence(b) {
             if (!b.recurring || !b.dueDate) return { date: b.dueDate, st: b.status };
             const orig = new Date(b.dueDate + 'T00:00:00');
             if (isNaN(orig.getTime())) return { date: b.dueDate, st: b.status };
             const day = orig.getDate();
+            const yearly = !!b.yearly;
             let d = new Date(orig.getFullYear(), orig.getMonth(), Math.min(day, new Date(orig.getFullYear(), orig.getMonth() + 1, 0).getDate()));
             for (let i = 0; i < 24; i++) {
                 const st = billMonthStatus(b, d.getFullYear(), d.getMonth());
                 if (st !== 'paid') return { date: bfIsoDate(d), st: st };
-                const nm = d.getMonth() + 1;
-                d = new Date(d.getFullYear(), nm, Math.min(day, new Date(d.getFullYear(), nm + 1, 0).getDate()));
+                if (yearly) {
+                    const ny = d.getFullYear() + 1;
+                    d = new Date(ny, d.getMonth(), Math.min(day, new Date(ny, d.getMonth() + 1, 0).getDate()));
+                } else {
+                    const nm = d.getMonth() + 1;
+                    d = new Date(d.getFullYear(), nm, Math.min(day, new Date(d.getFullYear(), nm + 1, 0).getDate()));
+                }
             }
             return { date: bfIsoDate(d), st: 'scheduled' };
         }
@@ -1962,7 +2019,7 @@
 
         function renderForecast() {
             const c=document.getElementById('forecastChart'),now=new Date(),months=[],values=[];
-            for(let i=0;i<12;i++){const d=new Date(now.getFullYear(),now.getMonth()+i,1);months.push(d.toLocaleString('default',{month:'short'}));values.push(Math.round(bills.filter(b=>b.recurring).reduce((s,b)=>s+b.amount,0)*(0.9+Math.random()*0.2)));}
+            for(let i=0;i<12;i++){const d=new Date(now.getFullYear(),now.getMonth()+i,1);months.push(d.toLocaleString('default',{month:'short'}));values.push(Math.round((bfMonthlyRecurringTotal()+bfYearlyTotalForMonth(d.getMonth()))*(0.9+Math.random()*0.2)));}
             const mx=Math.max(...values);
             c.innerHTML=months.map((m,i)=>`<div class="bar-group"><div class="bar-value">${formatCurrency(values[i])}</div><div class="bar" style="height:${(values[i]/mx)*190}px;background:${i>0?'linear-gradient(135deg,rgba(139,92,246,0.6),rgba(139,92,246,0.3))':'var(--gradient-purple)'};${i>0?'opacity:0.7;border:1px dashed rgba(139,92,246,0.3);':''}"></div><div class="bar-label">${m}</div></div>`).join('');
             document.getElementById('nextMonthTotal').textContent=formatCurrency(values[1]);
@@ -2414,7 +2471,8 @@
                 document.getElementById('billInterestRate').value=bill.interestRate||'';
                 document.getElementById('billPreferredAccount').value=bill.preferredAccountId||'';
                 setRateType(bill.interestRateType||'annual');
-                document.getElementById('recurringToggle').classList.toggle('active',bill.recurring);
+                document.getElementById('recurringToggle').classList.toggle('active',!!bill.recurring&&!bill.yearly);
+                document.getElementById('recurringYearlyToggle').classList.toggle('active',!!bill.yearly);
                 pt.classList.toggle('active',bill.isPayoff);pf.style.display=bill.isPayoff?'block':'none';
                 // Show current balance remaining if it's a payoff bill with payments
                 const cbd = document.getElementById('currentBalanceDisplay');
@@ -2437,22 +2495,22 @@
                 document.getElementById('billCategory').value='utilities';document.getElementById('billStatus').value='pending';
                 loadBillNotesEditor('');document.getElementById('billTotalOwed').value='';
                 document.getElementById('billPreferredAccount').value='';
-                document.getElementById('recurringToggle').classList.add('active');pt.classList.remove('active');pf.style.display='none';
+                document.getElementById('recurringToggle').classList.add('active');document.getElementById('recurringYearlyToggle').classList.remove('active');pt.classList.remove('active');pf.style.display='none';
             }
         }
         function closeModal() { document.getElementById('billModal').classList.remove('active');editingBillId=null; }
         function saveBill() {
             const name=document.getElementById('billName').value.trim(),title=document.getElementById('billTitle').value.trim(),amount=parseFloat(document.getElementById('billAmount').value),dueDate=document.getElementById('billDueDate').value;
             const category=document.getElementById('billCategory').value,status=document.getElementById('billStatus').value,notes=document.getElementById('billNotes').value.trim();
-            const recurring=document.getElementById('recurringToggle').classList.contains('active'),isPayoff=document.getElementById('payoffToggle').classList.contains('active');
+            const recurring=document.getElementById('recurringToggle').classList.contains('active'),yearly=recurring&&document.getElementById('recurringYearlyToggle').classList.contains('active'),isPayoff=document.getElementById('payoffToggle').classList.contains('active');
             const totalOwed=isPayoff?parseFloat(document.getElementById('billTotalOwed').value)||0:0;
             const interestRate=isPayoff?parseFloat(document.getElementById('billInterestRate').value)||0:0;
             const interestRateType=isPayoff?currentRateType:'annual';
             const preferredAccountId=parseInt(document.getElementById('billPreferredAccount').value)||null;
             if(!name||!amount||!dueDate){showToast('Fill required fields.','error');return;}
             if(isPayoff&&totalOwed<=0){showToast('Enter valid total balance.','error');return;}
-            if(editingBillId){const idx=bills.findIndex(b=>b.id===editingBillId);if(idx!==-1){bills[idx]={...bills[idx],name,title,amount,dueDate,category,status,notes,recurring,isPayoff,totalOwed,interestRate,interestRateType,preferredAccountId};if(!isPayoff){bills[idx].paidAmount=0;bills[idx].payments=[];bills[idx].interestRate=0;bills[idx].interestRateType='annual';}}showToast(`"${billTitle({name:name,title:title})}" updated.`,'success');}
-            else{const id=bills.length?Math.max(...bills.map(b=>b.id))+1:1;bills.push({id,name,title,amount,dueDate,category,status,notes,recurring,isPayoff,totalOwed,interestRate,interestRateType,paidAmount:0,payments:[],preferredAccountId});showToast(`"${billTitle({name:name,title:title})}" added.`,'success');}
+            if(editingBillId){const idx=bills.findIndex(b=>b.id===editingBillId);if(idx!==-1){bills[idx]={...bills[idx],name,title,amount,dueDate,category,status,notes,recurring,yearly,isPayoff,totalOwed,interestRate,interestRateType,preferredAccountId};if(!isPayoff){bills[idx].paidAmount=0;bills[idx].payments=[];bills[idx].interestRate=0;bills[idx].interestRateType='annual';}}showToast(`"${billTitle({name:name,title:title})}" updated.`,'success');}
+            else{const id=bills.length?Math.max(...bills.map(b=>b.id))+1:1;bills.push({id,name,title,amount,dueDate,category,status,notes,recurring,yearly,isPayoff,totalOwed,interestRate,interestRateType,paidAmount:0,payments:[],preferredAccountId});showToast(`"${billTitle({name:name,title:title})}" added.`,'success');}
             saveData();closeModal();renderAll();
         }
         function editBill(id) { const b=bills.find(x=>x.id===id); if(b) openModal(b); }
@@ -2585,7 +2643,7 @@
 
         function exportData() {
             const h=['Name','Title','Amount','Due Date','Category','Status','Recurring','Payoff','Total Owed','Paid','Remaining','Notes'];
-            const r=bills.map(b=>[b.name,b.title||'',b.amount,b.dueDate,b.category,b.status,b.recurring,b.isPayoff,b.totalOwed,b.paidAmount,Math.max(0,b.totalOwed-b.paidAmount),b.notes]);
+            const r=bills.map(b=>[b.name,b.title||'',b.amount,b.dueDate,b.category,b.status,b.recurring?(b.yearly?'Yearly':'Monthly'):'No',b.isPayoff,b.totalOwed,b.paidAmount,Math.max(0,b.totalOwed-b.paidAmount),b.notes]);
             const csv=[h,...r].map(x=>x.map(c=>`"${c}"`).join(',')).join('\n');
             const blob=new Blob([csv],{type:'text/csv'}),url=URL.createObjectURL(blob),a=document.createElement('a');
             a.href=url;a.download=`billflow_${new Date().toISOString().split('T')[0]}.csv`;a.click();URL.revokeObjectURL(url);showToast('Exported!','success');
@@ -3750,6 +3808,7 @@
             document.getElementById('tagNewCategory').innerHTML = Object.entries(categoryConfig).map(([k, c]) => `<option value="${k}">${bfEscapeHtml(c.label)}</option>`).join('');
             document.getElementById('tagNewCategory').value = 'other';
             document.getElementById('tagNewRecurring').classList.add('active');
+            document.getElementById('tagNewYearly').classList.remove('active');
             const sel = document.getElementById('tagExistSelect');
             sel.innerHTML = bills.slice().sort((a, b) => billTitle(a).localeCompare(billTitle(b))).map(b => `<option value="${b.id}">${bfEscapeHtml(billTitle(b))} (${formatCurrency(planBillRemaining(b))}/mo)</option>`).join('');
             setTagMode('new', document.getElementById('tagModeNewBtn'));
@@ -3782,8 +3841,9 @@
                 if (!amt || amt <= 0) { showToast('Enter a valid amount.', 'error'); return; }
                 const category = document.getElementById('tagNewCategory').value;
                 const recurring = document.getElementById('tagNewRecurring').classList.contains('active');
+                const yearly = recurring && document.getElementById('tagNewYearly').classList.contains('active');
                 const id = bills.length ? Math.max(...bills.map(b => b.id)) + 1 : 1;
-                const bill = { id: id, name: name, title: title, amount: amt, dueDate: r.date, category: category, status: 'paid', recurring: recurring, isPayoff: false, totalOwed: 0, paidAmount: 0, payments: [], interestRate: 0, interestRateType: 'annual', notes: '', preferredAccountId: acc.id, matchKey: mk };
+                const bill = { id: id, name: name, title: title, amount: amt, dueDate: r.date, category: category, status: 'paid', recurring: recurring, yearly: yearly, isPayoff: false, totalOwed: 0, paidAmount: 0, payments: [], interestRate: 0, interestRateType: 'annual', notes: '', preferredAccountId: acc.id, matchKey: mk };
                 recordTaggedPayment(bill, r, acc);
                 bills.push(bill);
                 msg = `"${title}" created — future imports with this description will be matched automatically.`;
@@ -3995,7 +4055,7 @@
             for (let i = 11; i >= 0; i--) {
                 const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
                 months.push(d.toLocaleString('default', { month: 'short' }));
-                values.push(Math.round(bills.filter(b => b.recurring).reduce((s, b) => s + b.amount, 0) * (0.85 + Math.random() * 0.3)));
+                values.push(Math.round((bfMonthlyRecurringTotal() + bfYearlyTotalForMonth(d.getMonth())) * (0.85 + Math.random() * 0.3)));
             }
             const mx = Math.max(...values);
             c.innerHTML = months.map((m, i) => `<div class="bar-group"><div class="bar-value">${formatCurrency(values[i])}</div><div class="bar" style="height:${(values[i] / mx) * 220}px;background:${i === months.length - 1 ? 'var(--gradient-blue)' : 'linear-gradient(135deg,rgba(59,130,246,0.6),rgba(59,130,246,0.3))'};${i === months.length - 1 ? 'box-shadow:0 0 20px rgba(59,130,246,0.3);' : ''}"></div><div class="bar-label">${m}</div></div>`).join('');
@@ -4430,6 +4490,7 @@
             { key: 'dueDate',  label: 'Due Date',  required: false, hint: 'MM/DD/YYYY · YYYY-MM-DD · Jan 5 2026' },
             { key: 'category', label: 'Category',  required: false, hint: 'housing, utilities, debt…' },
             { key: 'status',   label: 'Status',    required: false, hint: 'paid / pending / overdue' },
+            { key: 'recurring',label: 'Recurring', required: false, hint: 'monthly / yearly / no' },
             { key: 'notes',    label: 'Notes',     required: false, hint: 'Any extra text' }
         ];
 
@@ -4439,6 +4500,7 @@
             dueDate:  ['duedate', 'datedue', 'due', 'date', 'paymentdate', 'deadline', 'nextdue', 'when'],
             category: ['category', 'type', 'group', 'class', 'bucket', 'kind', 'tag'],
             status:   ['status', 'state', 'paid', 'ispaid', 'paymentstatus'],
+            recurring:['recurring', 'repeat', 'frequency', 'cadence', 'interval', 'period', 'cycle'],
             notes:    ['notes', 'note', 'memo', 'comment', 'comments', 'details', 'extra']
         };
 
@@ -4680,11 +4742,14 @@
                 const category = mp.category === '' ? 'other' : normalizeCategory(get(row, 'category'));
                 const status = mp.status === '' ? 'pending' : normalizeStatus(get(row, 'status'));
                 const notes = mp.notes === '' ? '' : String(get(row, 'notes') || '').trim();
+                const recRaw = mp.recurring === '' ? '' : String(get(row, 'recurring') || '').trim().toLowerCase();
+                const yearly = /year|annual|annum/.test(recRaw);
+                const recurring = yearly || /^(y|yes|true|1|on|x|month|monthly|recurring)$/.test(recRaw);
                 let error = '';
                 if (!name) error = 'Missing bill name';
                 else if (amount === null) error = 'Amount is not a number';
                 else if (mp.dueDate !== '' && !dueDate) error = 'Unrecognized date';
-                return { name: name, amount: amount, dueDate: dueDate, category: category, status: status, notes: notes, error: error };
+                return { name: name, amount: amount, dueDate: dueDate, category: category, status: status, notes: notes, recurring: recurring, yearly: yearly, error: error };
             });
         }
 
@@ -4699,10 +4764,10 @@
                 (invalid ? '<div class="import-summary-item"><div class="value" style="color:var(--accent-red);">' + invalid + '</div><div class="label">Will Be Skipped</div></div>' : '') +
                 '<div class="import-summary-item"><div class="value" style="color:var(--accent-blue);">' + formatCurrency(valid.reduce((s, r) => s + Math.abs(r.amount), 0)) + '</div><div class="label">Total Monthly</div></div>';
             document.getElementById('importPreviewTable').innerHTML =
-                '<thead><tr><th>Name</th><th>Category</th><th>Amount</th><th>Due Date</th><th>Status</th><th>Result</th></tr></thead><tbody>' +
+                '<thead><tr><th>Name</th><th>Category</th><th>Amount</th><th>Due Date</th><th>Status</th><th>Recurring</th><th>Result</th></tr></thead><tbody>' +
                 rows.map(r => r.error
-                    ? '<tr class="skipped"><td>' + (impEsc(r.name) || '(blank)') + '</td><td>—</td><td>' + impEsc(r.amount) + '</td><td>—</td><td>—</td><td><span class="import-row-issue"><i class="fas fa-triangle-exclamation"></i> ' + impEsc(r.error) + '</span></td></tr>'
-                    : '<tr><td>' + impEsc(r.name) + '</td><td>' + impEsc(r.category) + '</td><td>' + formatCurrency(Math.abs(r.amount)) + '</td><td>' + (r.dueDate || '—') + '</td><td style="text-transform:capitalize;">' + r.status + '</td><td><span class="import-row-ok"><i class="fas fa-check"></i> OK</span></td></tr>'
+                    ? '<tr class="skipped"><td>' + (impEsc(r.name) || '(blank)') + '</td><td>—</td><td>' + impEsc(r.amount) + '</td><td>—</td><td>—</td><td>—</td><td><span class="import-row-issue"><i class="fas fa-triangle-exclamation"></i> ' + impEsc(r.error) + '</span></td></tr>'
+                    : '<tr><td>' + impEsc(r.name) + '</td><td>' + impEsc(r.category) + '</td><td>' + formatCurrency(Math.abs(r.amount)) + '</td><td>' + (r.dueDate || '—') + '</td><td style="text-transform:capitalize;">' + r.status + '</td><td>' + (r.recurring ? (r.yearly ? 'Yearly' : 'Monthly') : 'No') + '</td><td><span class="import-row-ok"><i class="fas fa-check"></i> OK</span></td></tr>'
                 ).join('') + '</tbody>';
             document.getElementById('importPreviewModal').classList.add('active');
         }
@@ -4722,7 +4787,7 @@
                     id: nextId++, name: r.name, amount: Math.abs(r.amount),
                     dueDate: r.dueDate || new Date().toISOString().split('T')[0],
                     category: r.category, status: r.status, notes: r.notes,
-                    recurring: false, isPayoff: false, totalOwed: 0, paidAmount: 0,
+                    recurring: !!r.recurring, yearly: !!r.yearly, isPayoff: false, totalOwed: 0, paidAmount: 0,
                     payments: [], interestRate: 0, interestRateType: 'annual', preferredAccountId: null
                 });
                 added++;

@@ -63,6 +63,14 @@ Notes:
   rows are added — nothing is duplicated and nothing is wiped. To start an
   account over, use **Clear transactions** (in the account's Activity view,
   next to Export CSV); Activity rows also support multi-select + delete.
+- Bills recur **monthly or yearly**. The bill form has two mutually exclusive
+  recurring toggles (only one can be on at a time) and the bank-import
+  "tag as bill" dialog offers the same pair. A yearly bill occurs once a year
+  in the month of its due date: it appears only in that month's All Bills
+  view, its status is tracked per year (paid → next year reads scheduled
+  again), the paycheck planner rolls it forward a full year at a time, the
+  monthly summary cards only count it in its own month, and the CSV
+  Recurring column round-trips `Monthly` / `Yearly` / `No`.
 - First sign-in seeds the same sample bills the original app used, so you can
   explore immediately; "Clear Data" in Settings empties your account.
 - **Backup & Restore** in Settings downloads your entire page (bills, accounts,
