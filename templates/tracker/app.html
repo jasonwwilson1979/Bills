@@ -2502,7 +2502,9 @@
         function saveBill() {
             const name=document.getElementById('billName').value.trim(),title=document.getElementById('billTitle').value.trim(),amount=parseFloat(document.getElementById('billAmount').value),dueDate=document.getElementById('billDueDate').value;
             const category=document.getElementById('billCategory').value,status=document.getElementById('billStatus').value,notes=document.getElementById('billNotes').value.trim();
-            const recurring=document.getElementById('recurringToggle').classList.contains('active'),yearly=recurring&&document.getElementById('recurringYearlyToggle').classList.contains('active'),isPayoff=document.getElementById('payoffToggle').classList.contains('active');
+            // Either toggle means the bill recurs; the yearly toggle alone
+            // selects the yearly cadence (monthly is auto-cleared when it is on).
+            const monthlyOn=document.getElementById('recurringToggle').classList.contains('active'),yearly=document.getElementById('recurringYearlyToggle').classList.contains('active'),recurring=monthlyOn||yearly,isPayoff=document.getElementById('payoffToggle').classList.contains('active');
             const totalOwed=isPayoff?parseFloat(document.getElementById('billTotalOwed').value)||0:0;
             const interestRate=isPayoff?parseFloat(document.getElementById('billInterestRate').value)||0:0;
             const interestRateType=isPayoff?currentRateType:'annual';
@@ -3840,8 +3842,9 @@
                 if (!title) { showToast('Give the bill a title.', 'error'); return; }
                 if (!amt || amt <= 0) { showToast('Enter a valid amount.', 'error'); return; }
                 const category = document.getElementById('tagNewCategory').value;
-                const recurring = document.getElementById('tagNewRecurring').classList.contains('active');
-                const yearly = recurring && document.getElementById('tagNewYearly').classList.contains('active');
+                const monthlyOn = document.getElementById('tagNewRecurring').classList.contains('active');
+                const yearly = document.getElementById('tagNewYearly').classList.contains('active');
+                const recurring = monthlyOn || yearly;
                 const id = bills.length ? Math.max(...bills.map(b => b.id)) + 1 : 1;
                 const bill = { id: id, name: name, title: title, amount: amt, dueDate: r.date, category: category, status: 'paid', recurring: recurring, yearly: yearly, isPayoff: false, totalOwed: 0, paidAmount: 0, payments: [], interestRate: 0, interestRateType: 'annual', notes: '', preferredAccountId: acc.id, matchKey: mk };
                 recordTaggedPayment(bill, r, acc);

@@ -767,7 +767,9 @@ class TemplateScriptTests(TestCase):
                        'recurring: !!r.recurring, yearly: !!r.yearly',
                        "b.recurring?(b.yearly?'Yearly':'Monthly'):'No'",
                        'bfYearlyTotalForMonth(d.getMonth())',
-                       "yearly=recurring&&document.getElementById('recurringYearlyToggle')",
+                       "yearly=document.getElementById('recurringYearlyToggle')",
+                       'recurring=monthlyOn||yearly',
+                       'const recurring = monthlyOn || yearly;',
                        'const yearly = !!b.yearly;',
                        'if (b.yearly) return billMonth === m && billYear <= y;'):
             self.assertIn(needle, html)
