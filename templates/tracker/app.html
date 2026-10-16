@@ -623,7 +623,7 @@
                 </div>
                 <div class="content-grid">
                     <div class="card">
-                        <div class="card-header"><h3 class="card-title">Upcoming Bills</h3><div class="filter-tabs"><button class="filter-tab active" onclick="filterBills('all', this)">All</button><button class="filter-tab" onclick="filterBills('pending', this)">Pending</button><button class="filter-tab" onclick="filterBills('paid', this)">Paid</button><button class="filter-tab" onclick="filterBills('overdue', this)">Overdue</button></div></div>
+                        <div class="card-header"><h3 class="card-title">Upcoming Bills</h3><div class="filter-tabs"><button class="filter-tab active" onclick="filterBills('all', this)">All</button><button class="filter-tab" onclick="filterBills('pending', this)">Pending</button><button class="filter-tab" onclick="filterBills('scheduled', this)">Scheduled</button><button class="filter-tab" onclick="filterBills('paid', this)">Paid</button><button class="filter-tab" onclick="filterBills('overdue', this)">Overdue</button></div></div>
                         <div id="billsListContainer"></div>
                     </div>
                     <div style="display:flex;flex-direction:column;gap:24px;">
@@ -977,7 +977,7 @@
                 </div>
                 <div class="form-row">
                     <div class="form-group"><label class="form-label">Category</label><select class="form-select" id="billCategory"></select></div>
-                    <div class="form-group"><label class="form-label">Status</label><select class="form-select" id="billStatus"><option value="pending">Pending</option><option value="paid">Paid</option><option value="overdue">Overdue</option></select></div>
+                    <div class="form-group"><label class="form-label">Status</label><select class="form-select" id="billStatus"><option value="pending">Pending</option><option value="scheduled">Scheduled — not due yet</option><option value="paid">Paid</option><option value="overdue">Overdue</option></select></div>
                 </div>
                 <div class="form-group">
                     <div class="toggle-group"><div class="toggle" id="payoffToggle" onclick="togglePayoffFields()"></div><span class="toggle-label">Track payoff balance?</span></div>
@@ -1344,6 +1344,15 @@
         </div>
     </div>
 
+    <!-- BILL DETAILS MODAL (click a bill) -->
+    <div class="modal-overlay" id="billDetailModal" style="z-index:2600;">
+        <div class="modal" style="width:720px;">
+            <div class="modal-header"><h3 class="modal-title" id="billDetailTitle">Bill</h3><button class="modal-close" onclick="closeBillDetail()"><i class="fas fa-times"></i></button></div>
+            <div class="modal-body" style="max-height:70vh;overflow-y:auto;" id="billDetailBody"></div>
+            <div class="modal-footer" id="billDetailActions"></div>
+        </div>
+    </div>
+
     <!-- BULK PAY BAR -->
     <div class="bulk-pay-bar" id="bulkPayBar">
         <div class="bulk-pay-info"><div class="bulk-pay-count" id="bulkPayCount">0</div><span class="bulk-pay-text">bills selected</span></div>
@@ -1658,31 +1667,31 @@
             // In the All Bills month view, recurring bills get a per-month
             // status: a bill paid this month reads "scheduled" in later months
             // instead of staying "paid" forever.
-            const st=view?billMonthStatus(bill,view.y,view.m):bill.status;
+            const st=view?billMonthStatus(bill,view.y,view.m):billNowStatus(bill);
             const needsPay=st!=='paid';
             const showUnpay=st==='paid'&&bill.payments&&bill.payments.length>0;
             const sel=selectedBillIds.has(bill.id);
             const stLabel=st.charAt(0).toUpperCase()+st.slice(1);
-            return `<div class="bill-row${sel?' selected':''}" data-bid="${bill.id}">
+            return `<div class="bill-row${sel?' selected':''}" data-bid="${bill.id}" onclick="openBillDetail(${bill.id})" title="View details &amp; payment history">
                 <input type="checkbox" class="bill-checkbox" ${sel?'checked':''} onclick="event.stopPropagation();toggleBillSelection(${bill.id})" title="Select for bulk payment">
                 <div class="bill-icon ${cat.class}"><i class="fas ${cat.icon}"></i></div>
                 <div class="bill-info"><h4>${billTitle(bill)}${bill.recurring?`<span class="recurring-badge"><i class="fas fa-redo"></i> ${bill.yearly?'Yearly':'Monthly'}</span>`:''}</h4><p><span class="category-tag ${bill.category}">${cat.label}</span> <span class="bill-status ${st}"><span class="bill-status-dot"></span>${stLabel}</span></p>${getPayoffHTML(bill)}</div>
                 <div class="bill-amount">${isPayoff?`${formatCurrency(bill.amount)}<div style="font-size:11px;color:var(--text-muted);font-weight:500;">/mo</div>`:(bill.yearly?`${formatCurrency(bill.amount)}<div style="font-size:11px;color:var(--text-muted);font-weight:500;">/yr</div>`:formatCurrency(bill.amount))}</div>
                 <div class="bill-date">${formatDate(getProjectedDueDate(bill))}</div>
                 <div class="bill-actions">
-                    ${bill.notes?`<button class="action-btn note" onclick="toggleBillNotes(${bill.id})" title="Notes"><i class="fas fa-note-sticky"></i></button>`:''}
-                    ${needsPay?`<button class="action-btn pay" onclick="openPaymentModal(${bill.id})" title="Pay"><i class="fas fa-dollar-sign"></i></button>`:''}
-                    ${showUnpay?`<button class="action-btn unpay" onclick="openUnpayModal(${bill.id})" title="Unpay"><i class="fas fa-undo"></i></button>`:''}
-                    <button class="action-btn edit" onclick="editBill(${bill.id})" title="Edit"><i class="fas fa-pen"></i></button>
-                    <button class="action-btn delete" onclick="deleteBill(${bill.id})" title="Delete"><i class="fas fa-trash"></i></button>
+                    ${bill.notes?`<button class="action-btn note" onclick="event.stopPropagation();toggleBillNotes(${bill.id})" title="Notes"><i class="fas fa-note-sticky"></i></button>`:''}
+                    ${needsPay?`<button class="action-btn pay" onclick="event.stopPropagation();openPaymentModal(${bill.id})" title="Pay"><i class="fas fa-dollar-sign"></i></button>`:''}
+                    ${showUnpay?`<button class="action-btn unpay" onclick="event.stopPropagation();openUnpayModal(${bill.id})" title="Unpay"><i class="fas fa-undo"></i></button>`:''}
+                    <button class="action-btn edit" onclick="event.stopPropagation();editBill(${bill.id})" title="Edit"><i class="fas fa-pen"></i></button>
+                    <button class="action-btn delete" onclick="event.stopPropagation();deleteBill(${bill.id})" title="Delete"><i class="fas fa-trash"></i></button>
                 </div>
-                ${bill.notes?`<div class="bill-notes-panel" id="billNotesPanel-${bill.id}">${bfSanitizeRich(bill.notes)}</div>`:''}
+                ${bill.notes?`<div class="bill-notes-panel" id="billNotesPanel-${bill.id}" onclick="event.stopPropagation()">${bfSanitizeRich(bill.notes)}</div>`:''}
             </div>`;
         }
 
         function renderDashboardBills() {
             const c=document.getElementById('billsListContainer');
-            let f=currentFilter==='all'?[...bills]:bills.filter(b=>b.status===currentFilter);
+            let f=currentFilter==='all'?[...bills]:bills.filter(b=>billNowStatus(b)===currentFilter);
             f.sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate)); f=f.slice(0,8);
             c.innerHTML=f.length?f.map(b=>renderBillRow(b)).join(''):`<div class="empty-state"><i class="fas fa-file-invoice"></i><h3>No bills found</h3><p>Add your first bill!</p></div>`;
         }
@@ -1820,7 +1829,13 @@
         // A month counts as paid when a payment was recorded during it; future
         // months with no payment yet read as "scheduled".
         function billMonthStatus(b, y, m) {
-            if (!b.recurring) return b.status;
+            const now = new Date();
+            if (!b.recurring) {
+                // A one-off bill dated in a future month has no payment yet but
+                // will need to be paid — show "scheduled", not "pending".
+                if (b.status !== 'paid' && (y > now.getFullYear() || (y === now.getFullYear() && m > now.getMonth()))) return 'scheduled';
+                return b.status;
+            }
             if (b.yearly) {
                 // Yearly bills have no occurrence outside their own month.
                 const od = new Date(b.dueDate + 'T00:00:00');
@@ -1832,7 +1847,6 @@
                 return !isNaN(d.getTime()) && d.getFullYear() === y && d.getMonth() === m;
             });
             if (paidHere) return 'paid';
-            const now = new Date();
             if (y === now.getFullYear() && m === now.getMonth()) {
                 // This month's occurrence is due: pending before the due day,
                 // overdue after it (the stored status only reflects the last
@@ -1844,14 +1858,27 @@
             return 'paid'; // past months without a recorded payment are assumed handled
         }
 
+        // Status shown outside a month view (dashboard rows, category lists):
+        // a bill that is not paid yet but is not due yet reads "scheduled" — it
+        // still has to be paid, it just has no payment date yet. Past-due bills
+        // keep whatever status they were saved with.
+        function billNowStatus(b) {
+            if (!b || b.status === 'paid') return b.status;
+            const d = b.dueDate ? new Date(b.dueDate + 'T00:00:00') : null;
+            if (!d || isNaN(d.getTime())) return b.status;
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            return d > today ? 'scheduled' : b.status;
+        }
+
         // The occurrence of a bill the current planning cycle cares about:
         // its due date, or — for a recurring bill already paid — the first
         // later occurrence (next month, or next year for yearly bills)
         // without a recorded payment (clamped to short months).
         function planOccurrence(b) {
-            if (!b.recurring || !b.dueDate) return { date: b.dueDate, st: b.status };
+            if (!b.recurring || !b.dueDate) return { date: b.dueDate, st: billNowStatus(b) };
             const orig = new Date(b.dueDate + 'T00:00:00');
-            if (isNaN(orig.getTime())) return { date: b.dueDate, st: b.status };
+            if (isNaN(orig.getTime())) return { date: b.dueDate, st: billNowStatus(b) };
             const day = orig.getDate();
             const yearly = !!b.yearly;
             let d = new Date(orig.getFullYear(), orig.getMonth(), Math.min(day, new Date(orig.getFullYear(), orig.getMonth() + 1, 0).getDate()));
@@ -3121,6 +3148,94 @@
             if (el) el.classList.toggle('open');
         }
 
+        // ============ BILL DETAILS (click a bill: info + payment history) ============
+        let detailBillId = null;
+        function openBillDetail(id) {
+            const b = bills.find(x => x.id === id);
+            if (!b) return;
+            detailBillId = id;
+            renderBillDetail();
+            document.getElementById('billDetailModal').classList.add('active');
+        }
+        function closeBillDetail() {
+            document.getElementById('billDetailModal').classList.remove('active');
+            detailBillId = null;
+        }
+        function renderBillDetail() {
+            const b = bills.find(x => x.id === detailBillId);
+            if (!b) { closeBillDetail(); return; }
+            const cat = categoryConfig[b.category] || categoryConfig.other;
+            const st = billNowStatus(b);
+            const stLabel = st.charAt(0).toUpperCase() + st.slice(1);
+            const occ = planOccurrence(b);
+            const dueDate = (occ && occ.date) || b.dueDate;
+            const payments = (b.payments || []).slice().sort((x, y) => (x.date < y.date ? 1 : -1));
+            const totalPaid = payments.reduce((s, p) => s + (p.amount || 0), 0);
+            const accName = pid => { const a = accounts.find(x => x.id === pid); return a ? a.name : 'Unknown account'; };
+            const orig = new Date((b.dueDate || '') + 'T00:00:00');
+            const cadence = !b.recurring ? 'One-off' : (b.yearly
+                ? `Yearly — every ${monthNames[orig.getMonth()]}`
+                : `Monthly — day ${orig.getDate()} of the month`);
+            const sig = b.matchKey || descMatchKey(b.name || '');
+            document.getElementById('billDetailTitle').innerHTML = `<i class="fas ${cat.icon}" style="color:${colorMap[cat.color]};margin-right:8px;"></i>${bfEscapeHtml(billTitle(b))}`;
+
+            const info = [
+                ['Amount', `${formatCurrency(b.amount)}${b.isPayoff ? ' /mo' : (b.yearly ? ' /yr' : '')}`],
+                [b.recurring ? 'Next occurrence' : 'Due date', dueDate ? formatDate(dueDate) : '—'],
+                ['Status', `<span class="bill-status ${st}"><span class="bill-status-dot"></span>${stLabel}</span>`],
+                ['Category', cat.label],
+                ['Cadence', cadence],
+                ['Bank description (Name)', b.name ? bfEscapeHtml(b.name) : '—'],
+                ['Bank match signature', sig
+                    ? `<code style="font-size:11.5px;">${bfEscapeHtml(sig)}</code> <span style="color:var(--text-muted);">${b.matchKey ? '(set by “Tag as bill”)' : '(derived from its Name)'} — imports with this description auto-pay this bill</span>`
+                    : '<span style="color:var(--text-muted);">no letters in the description, so imports cannot auto-match it</span>']
+            ];
+            if (b.preferredAccountId) info.push(['Preferred account', bfEscapeHtml(accName(b.preferredAccountId))]);
+            if (b.interestRate > 0) info.push(['Interest rate', `${b.interestRate}% ${b.interestRateType === 'daily' ? 'daily' : 'annual'}`]);
+            const infoHtml = `<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px 18px;">${info.map(([k, v]) => `<div style="min-width:0;"><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px;">${k}</div><div style="font-size:13.5px;margin-top:2px;word-break:break-word;">${v}</div></div>`).join('')}</div>`;
+            let payoff = '';
+            if (b.isPayoff) {
+                const rem = Math.max(0, (b.totalOwed || 0) - (b.paidAmount || 0));
+                const pct = b.totalOwed > 0 ? Math.min(((b.paidAmount || 0) / b.totalOwed) * 100, 100) : 0;
+                payoff = `<div style="margin-top:18px;padding:14px;background:var(--bg-input);border-radius:var(--radius-sm);">
+                    <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:13px;margin-bottom:8px;"><span style="color:var(--text-muted);">Payoff progress</span><b>${formatCurrency(b.paidAmount || 0)} of ${formatCurrency(b.totalOwed || 0)} · ${formatCurrency(rem)} left</b></div>
+                    <div class="progress-bar"><div class="progress-fill" style="width:${pct}%;background:${rem <= 0 ? 'var(--gradient-green)' : 'var(--gradient-blue)'};"></div></div>
+                    <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">${pct.toFixed(0)}% paid${rem <= 0 ? ' — paid off 🎉' : ''}</div>
+                </div>`;
+            }
+
+            const notesHtml = b.notes
+                ? `<div style="margin-top:18px;"><div class="settings-section-title" style="margin-bottom:8px;">Notes</div><div class="bill-notes-panel open" style="margin:0;">${bfSanitizeRich(b.notes)}</div></div>`
+                : '';
+
+            const byYear = {};
+            payments.forEach(p => { const y = (p.date || '').slice(0, 4) || 'Unknown'; byYear[y] = byYear[y] || { n: 0, sum: 0 }; byYear[y].n++; byYear[y].sum += (p.amount || 0); });
+            const yearLines = Object.entries(byYear).sort((a, b2) => b2[0].localeCompare(a[0]))
+                .map(([y, d]) => `<div style="display:flex;justify-content:space-between;font-size:12.5px;padding:3px 0;"><span style="color:var(--text-muted);">${y}</span><span>${d.n} payment${d.n === 1 ? '' : 's'} · <b>${formatCurrency(d.sum)}</b></span></div>`).join('');
+            const summary = payments.length
+                ? `${payments.length} payment${payments.length === 1 ? '' : 's'} · <b>${formatCurrency(totalPaid)}</b> total · ${formatDate(payments[payments.length - 1].date)} → ${formatDate(payments[0].date)} · avg ${formatCurrency(totalPaid / payments.length)}`
+                : 'No payments recorded yet.';
+            const history = payments.length ? payments.map(p => `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;background:var(--bg-input);border-radius:var(--radius-sm);margin-bottom:6px;">
+                    <div style="min-width:0;"><div style="font-size:13px;font-weight:600;">${formatDate(p.date)}</div><div style="font-size:11px;color:var(--text-muted);">${bfEscapeHtml(accName(p.accountId))}${p.note ? ' · ' + bfEscapeHtml(p.note) : ''}</div></div>
+                    <div style="font-weight:700;white-space:nowrap;">${formatCurrency(p.amount)}</div>
+                </div>`).join('')
+                : `<p style="color:var(--text-muted);font-size:13px;padding:6px 0;">Pay this bill and every payment will show up here with its date, amount and account.</p>`;
+            const historyHtml = `<div style="margin-top:18px;">
+                <div class="settings-section-title" style="margin-bottom:8px;">Payment history</div>
+                <div style="font-size:12.5px;color:var(--text-secondary);margin-bottom:10px;">${summary}</div>
+                ${yearLines ? `<div style="margin-bottom:12px;padding:10px 12px;background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-sm);">${yearLines}</div>` : ''}
+                ${history}
+            </div>`;
+
+            document.getElementById('billDetailBody').innerHTML = infoHtml + payoff + notesHtml + historyHtml;
+
+            const actions = ['<button class="btn btn-secondary" onclick="closeBillDetail()">Close</button>'];
+            if (st !== 'paid') actions.push(`<button class="btn btn-pay" onclick="closeBillDetail();openPaymentModal(${b.id})"><i class="fas fa-dollar-sign"></i> Pay now</button>`);
+            if (payments.length) actions.push(`<button class="btn btn-secondary" onclick="closeBillDetail();openUnpayModal(${b.id})"><i class="fas fa-undo"></i> Unpay last</button>`);
+            actions.push(`<button class="btn btn-primary" onclick="closeBillDetail();editBill(${b.id})"><i class="fas fa-pen"></i> Edit bill</button>`);
+            document.getElementById('billDetailActions').innerHTML = actions.join('');
+        }
+
         // ============ BILL TAGS IN CHAT ============
         function chatLinkBills(escapedBody) {
             return escapedBody.replace(/\[\[bill:(\d+)\]\]/g, (m0, id) => {
@@ -3202,14 +3317,15 @@
             el.innerHTML = list.length ? list.map(b => {
                 const occ = planOccurrence(b);
                 const when = (occ && occ.date) || b.dueDate;
-                const stLabel = b.status.charAt(0).toUpperCase() + b.status.slice(1);
-                return `<div class="catbill-row" onclick="closeCategoryBillsModal();editBill(${b.id})" title="Edit this bill">
+                const st = billNowStatus(b);
+                const stLabel = st.charAt(0).toUpperCase() + st.slice(1);
+                return `<div class="catbill-row" onclick="closeCategoryBillsModal();openBillDetail(${b.id})" title="View details &amp; payment history">
                     <div class="bill-icon ${cfg.class}"><i class="fas ${cfg.icon}"></i></div>
                     <div style="flex:1;min-width:0;">
                         <h4>${bfEscapeHtml(billTitle(b))}</h4>
                         <p>${when ? 'due ' + formatDate(when) : ''}${b.notes ? ' · 📝 notes' : ''}</p>
                     </div>
-                    <span class="bill-status ${b.status}"><span class="bill-status-dot"></span>${stLabel}</span>
+                    <span class="bill-status ${st}"><span class="bill-status-dot"></span>${stLabel}</span>
                     <div style="font-weight:700;white-space:nowrap;">${formatCurrency(b.amount)}</div>
                 </div>`;
             }).join('') : '<p style="color:var(--text-muted);font-size:13px;padding:12px 0;">No bills in this category.</p>';
@@ -3985,7 +4101,7 @@
                 statusBadge = `<span style="font-size:10px;background:rgba(16,185,129,0.15);color:var(--accent-green);padding:3px 10px;border-radius:4px;font-weight:600;"><i class="fas fa-check"></i> PAID OFF</span>`;
             }
 
-            return `<div class="bill-row">
+            return `<div class="bill-row" data-bid="${bill.id}" onclick="openBillDetail(${bill.id})" title="View details &amp; payment history">
                 <div class="bill-icon ${cat.class}"><i class="fas ${cat.icon}"></i></div>
                 <div class="bill-info">
                     <h4>${billTitle(bill)} ${statusBadge}</h4>
@@ -4009,9 +4125,9 @@
                     ${formatCurrency(bill.paidAmount)}
                 </div>
                 <div class="bill-actions">
-                    ${type !== 'paid' ? `<button class="action-btn pay" onclick="openPaymentModal(${bill.id})" title="Pay"><i class="fas fa-dollar-sign"></i></button>` : ''}
-                    <button class="action-btn edit" onclick="editBill(${bill.id})" title="Edit"><i class="fas fa-pen"></i></button>
-                    <button class="action-btn delete" onclick="deleteBill(${bill.id})" title="Delete"><i class="fas fa-trash"></i></button>
+                    ${type !== 'paid' ? `<button class="action-btn pay" onclick="event.stopPropagation();openPaymentModal(${bill.id})" title="Pay"><i class="fas fa-dollar-sign"></i></button>` : ''}
+                    <button class="action-btn edit" onclick="event.stopPropagation();editBill(${bill.id})" title="Edit"><i class="fas fa-pen"></i></button>
+                    <button class="action-btn delete" onclick="event.stopPropagation();deleteBill(${bill.id})" title="Delete"><i class="fas fa-trash"></i></button>
                 </div>
             </div>`;
         }
@@ -4541,7 +4657,7 @@
             { key: 'amount',   label: 'Amount',    required: true,  hint: '125.50 · $1,200 · (75) = -75' },
             { key: 'dueDate',  label: 'Due Date',  required: false, hint: 'MM/DD/YYYY · YYYY-MM-DD · Jan 5 2026' },
             { key: 'category', label: 'Category',  required: false, hint: 'housing, utilities, debt…' },
-            { key: 'status',   label: 'Status',    required: false, hint: 'paid / pending / overdue' },
+            { key: 'status',   label: 'Status',    required: false, hint: 'paid / pending / overdue / scheduled' },
             { key: 'recurring',label: 'Recurring', required: false, hint: 'monthly / yearly / no' },
             { key: 'notes',    label: 'Notes',     required: false, hint: 'Any extra text' }
         ];
@@ -4686,6 +4802,7 @@
             const s = String(raw || '').trim().toLowerCase();
             if (['paid', 'complete', 'completed', 'done', 'yes', 'y', 'true', '1', 'x'].indexOf(s) !== -1) return 'paid';
             if (['overdue', 'late', 'missed'].indexOf(s) !== -1) return 'overdue';
+            if (['scheduled', 'schedule', 'upcoming', 'future', 'notdue', 'notyet', 'planned', 'queued'].indexOf(s) !== -1) return 'scheduled';
             return 'pending';
         }
 
@@ -4898,6 +5015,8 @@
             if (btm) btm.addEventListener('click', e => { if (e.target === e.currentTarget) closeBillTagModal(); });
             const cbm = document.getElementById('categoryBillsModal');
             if (cbm) cbm.addEventListener('click', e => { if (e.target === e.currentTarget) closeCategoryBillsModal(); });
+            const bdm = document.getElementById('billDetailModal');
+            if (bdm) bdm.addEventListener('click', e => { if (e.target === e.currentTarget) closeBillDetail(); });
         })();
 
         // Load saved theme on startup

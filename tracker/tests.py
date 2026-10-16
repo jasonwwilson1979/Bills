@@ -808,6 +808,58 @@ class TemplateScriptTests(TestCase):
         self.assertNotIn('bills.find(b => b.matchKey === mk)', html)
         self.assertNotIn('bills.some(b => b.matchKey === mk)', html)
 
+    def test_scheduled_status_for_future_bills(self):
+        """A bill dated in the future has no payment yet but will need to be
+        paid, so it reads "Scheduled" instead of looking due now — both as a
+        selectable status and derived automatically for future-dated bills."""
+        from django.conf import settings
+
+        path = os.path.join(str(settings.BASE_DIR), 'templates', 'tracker', 'app.html')
+        with open(path, encoding='utf-8') as fh:
+            html = fh.read()
+        for needle in ('<option value="scheduled">Scheduled — not due yet</option>',
+                       'function billNowStatus(',
+                       "return d > today ? 'scheduled' : b.status;",
+                       "if (b.status !== 'paid' && (y > now.getFullYear() || (y === now.getFullYear() && m > now.getMonth()))) return 'scheduled';",
+                       'const st=view?billMonthStatus(bill,view.y,view.m):billNowStatus(bill);',
+                       'bills.filter(b=>billNowStatus(b)===currentFilter)',
+                       "onclick=\"filterBills('scheduled', this)\"",
+                       "onclick=\"filterAllBills('scheduled', this)\"",
+                       'const st = billNowStatus(b);',
+                       "['scheduled', 'schedule', 'upcoming', 'future', 'notdue', 'notyet', 'planned', 'queued']",
+                       'hint: \'paid / pending / overdue / scheduled\'',
+                       'st: billNowStatus(b)'):
+            self.assertIn(needle, html)
+        # The blue scheduled badge style already exists for the month view.
+        self.assertIn('.bill-status.scheduled', html)
+
+    def test_bill_detail_payment_history_exists(self):
+        """Clicking a bill opens a details modal showing the bill's info
+        (status, cadence, bank description + match signature, payoff progress,
+        notes) and its full payment history with per-year totals."""
+        from django.conf import settings
+
+        path = os.path.join(str(settings.BASE_DIR), 'templates', 'tracker', 'app.html')
+        with open(path, encoding='utf-8') as fh:
+            html = fh.read()
+        for needle in ('id="billDetailModal"', 'id="billDetailTitle"',
+                       'id="billDetailBody"', 'id="billDetailActions"',
+                       'function openBillDetail(', 'function closeBillDetail(',
+                       'function renderBillDetail(',
+                       'onclick="openBillDetail(${bill.id})"',
+                       'closeCategoryBillsModal();openBillDetail(${b.id})',
+                       'Payment history', 'Bank match signature',
+                       'Bank description (Name)', 'Payoff progress',
+                       'derived from its Name', 'Unpay last', 'Pay now'):
+            self.assertIn(needle, html)
+        # Row action buttons stop propagation so they keep their own behaviour
+        # instead of opening the details modal (checkbox, notes, pay, unpay,
+        # edit, delete in both bill lists).
+        self.assertGreaterEqual(html.count('onclick="event.stopPropagation();'), 8)
+        # Clicking the backdrop closes the modal.
+        self.assertIn("bdm.addEventListener('click'", html)
+        self.assertIn('openBillDetail', html)
+
 
 class TemplateStructureTests(TestCase):
     """Parses the *rendered* app page with html.parser (script bodies are

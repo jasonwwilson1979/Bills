@@ -80,6 +80,21 @@ Notes:
   when a bill's name appears inside the description (unique match, 5+ letters),
   so a bill named `Netflix` catches `NETFLIX.COM 866-579-7172`. Explicit
   signatures set by "Tag as bill" always take precedence.
+- **Scheduled** is a first-class bill status for anything dated in the future:
+  it is selectable in the bill form ("Scheduled — not due yet") and applied
+  automatically to any unpaid bill whose due date has not arrived yet, so a
+  next-month bill reads *Scheduled* (blue badge) instead of looking due now.
+  Scheduled bills still count as money owed in the paycheck planner, appear
+  under the new **Scheduled** filter tab on both the dashboard and All Bills,
+  and CSV import understands `scheduled` / `upcoming` / `future`. Past-due
+  bills keep whatever status you saved (Pending or Overdue).
+- **Click any bill to open its details** (dashboard, All Bills, Debts and the
+  Budget/Reports category drill-down): amount, status, next occurrence, cadence
+  (monthly day / yearly month / one-off), category, the raw bank description and
+  its import match signature, preferred account, interest rate, payoff progress
+  and its notes — plus the full **payment history** (every payment with date,
+  amount and account, a lifetime total with first→last dates and average, and
+  per-year totals). Actions inside: Pay now, Unpay last, Edit bill.
 - First sign-in seeds the same sample bills the original app used, so you can
   explore immediately; "Clear Data" in Settings empties your account.
 - **Backup & Restore** in Settings downloads your entire page (bills, accounts,
