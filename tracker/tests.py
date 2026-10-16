@@ -705,8 +705,8 @@ class TemplateScriptTests(TestCase):
                        'let tagRawName', "tagNewName').value = ''",
                        "h=['Name','Title','Amount'",
                        'function bfBillForRow(',
-                       'const explicit = bills.find(b => b.matchKey && b.matchKey === mk);',
-                       "descMatchKey(b.name || '') === mk"):
+                       'const explicit = bills.find(b => b.matchKey && b.matchKey === key);',
+                       "bfMatchKey(b.name || '')"):
             self.assertIn(needle, html)
         # Title used across the board: bill rows, calendar, savings, debts,
         # plan lists, payment modals, chips, pickers...
@@ -792,18 +792,19 @@ class TemplateScriptTests(TestCase):
             html = fh.read()
         for needle in ('function bfBillForRow(', 'function bankLooseMatchEnabled(',
                        'id="bankLooseMatch"', 'onchange="bankUpdatePreview()"',
-                       "const explicit = bills.find(b => b.matchKey && b.matchKey === mk);",
-                       "const exact = bills.find(b => descMatchKey(b.name || '') === mk);",
-                       'nk.length >= 5 && mk.indexOf(nk) !== -1',
+                       "const explicit = bills.find(b => b.matchKey && b.matchKey === key);",
+                       "const named = bills.find(b => { const nk = bfMatchKey(b.name || ''); return nk && nk === key; });",
+                       'nk.length >= 5 && key.indexOf(nk) !== -1',
                        'function bfDropSupersededDebit(',
                        'if (loose) loose.checked = true;',
                        'bfDropSupersededDebit(acc, r, claimedDeb, addedDeb);',
                        'return cands.length === 1 ? cands[0] : null;'):
             self.assertIn(needle, html)
         self.assertEqual(html.count('bfDropSupersededDebit(acc, r, claimedDeb, addedDeb);'), 2)
-        # Import, the preview count and the per-row preview annotation all use
-        # the same resolver (so the preview cannot disagree with the import).
-        self.assertEqual(html.count('bfBillForRow(r.desc, r.note, bankLooseMatchEnabled())'), 3)
+        # Import, the preview count, the per-row preview annotation and the
+        # key summary all use the same resolver (so the preview cannot disagree
+        # with the import).
+        self.assertEqual(html.count('bfBillForRow(r.desc, r.note, bankLooseMatchEnabled())'), 4)
         # The old match-signature-only lookup is gone everywhere.
         self.assertNotIn('bills.find(b => b.matchKey === mk)', html)
         self.assertNotIn('bills.some(b => b.matchKey === mk)', html)
@@ -859,6 +860,36 @@ class TemplateScriptTests(TestCase):
         # Clicking the backdrop closes the modal.
         self.assertIn("bdm.addEventListener('click'", html)
         self.assertIn('openBillDetail', html)
+
+    def test_bank_match_key_keeps_account_tokens_but_ignores_volatile_parts(self):
+        """The match key drops dates and long number runs (phone, SEQ#, check
+        numbers) so one bill matches every month, but keeps digits that are part
+        of an account token so separate loans/accounts never merge. The import
+        preview shows the key per row plus every distinct key in the file."""
+        from django.conf import settings
+
+        path = os.path.join(str(settings.BASE_DIR), 'templates', 'tracker', 'app.html')
+        with open(path, encoding='utf-8') as fh:
+            html = fh.read()
+        for needle in ('function bfMatchKey(',
+                       "t = t.replace(/\\d{4}-\\d{1,2}-\\d{1,2}/g, ' ');",
+                       "t = t.replace(/\\b\\d{1,2}\\/\\d{1,2}(\\/\\d{2,4})?\\b/g, ' ');",
+                       "t = t.replace(/[a-z0-9]+/g, tok => (/^\\d{3,}$/.test(tok) ? ' ' : tok));",
+                       'const key = bfMatchKey(raw);',
+                       "const legacyTag = bills.find(b => b.matchKey && b.matchKey === legacy && !bfMatchKey(b.name || ''));",
+                       "const sig = b.matchKey || bfMatchKey(b.name || '');",
+                       'r.matchKey || bfMatchKey(r.note || r.label)',
+                       'Match keys found in this file',
+                       '<th>Match key</th>',
+                       "bfMatchKey(r.desc || r.note) || '—'",
+                       'function updateBillNameKeyHint(',
+                       'id="billNameKeyHint"',
+                       'oninput="updateBillNameKeyHint()"'):
+            self.assertIn(needle, html)
+        # Every distinct key in the file is listed with the bill it will pay.
+        self.assertIn('<th>Bill it pays</th>', html)
+        # The digit-aware key drives matching, preview and tag-as-bill.
+        self.assertGreaterEqual(html.count('bfMatchKey('), 10)
 
 
 class TemplateStructureTests(TestCase):

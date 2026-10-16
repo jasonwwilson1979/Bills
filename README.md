@@ -72,14 +72,29 @@ Notes:
   monthly summary cards only count it in its own month, and the CSV
   Recurring column round-trips `Monthly` / `Yearly` / `No`.
 - **Bank imports auto-link to bills by raw bank description.** Matching uses the
-  bill's **Name** (the raw bank description / identifier, e.g.
-  `PURCHASE-SIG CARMAX 1234`) — never the Title. Descriptions are compared as
-  letters-only signatures so reference numbers, dates and amounts don't break
-  the match, and the import preview labels every row that will auto-pay a bill
-  (`→ Car Payment`) before you import. An opt-in checkbox additionally matches
-  when a bill's name appears inside the description (unique match, 5+ letters),
-  so a bill named `Netflix` catches `NETFLIX.COM 866-579-7172`. Explicit
-  signatures set by "Tag as bill" always take precedence.
+  bill's **Name** (the raw bank description / identifier) — never the Title.
+  Each row is reduced to a **match key**: dates and long number runs (phone
+  numbers, `SEQ#`/check numbers, store numbers) are dropped because they change
+  row to row, but **digits inside an account token are kept**, so separate
+  accounts stay separate. For example:
+  - `Signature POS Debit 10/09 VA 800-285-6609 VIRGINIA FEDERA ED SEQ# 075182 6484`
+    and `... 09/25 ... SEQ# 074893 6484` → the same key
+    `signatureposdebitvavirginiafederaedseq` (one bill, every month)
+  - `AFFIRM.COM PAYME AFFIRM.COM ST-O7L8L7M0T5E2` →
+    `affirmcompaymeaffirmcomsto7l8l7m0t5e2` while `...T5E3` →
+    `...t5e3` — **different Affirm loans never merge**
+
+  The import preview shows a **Match key** column per row plus a
+  **"Match keys found in this file"** table listing every distinct key, how many
+  rows it covers, and the bill it will pay (or "no bill yet — tag one of these
+  rows to create it"). The bill form shows the same key live under **Name**
+  (paste the bank's line, or just its token like `ST-O7L8L7M0T5E2`), so a bill
+  can be set up — or fixed — with no guesswork. An opt-in checkbox additionally
+  matches when a bill's name appears inside the description (unique match, 5+
+  characters), so a bill named `Netflix` catches `NETFLIX.COM 866-579-7172`.
+  Signatures set by "Tag as bill" still work, including older letters-only ones
+  (used only when the bill has no Name key of its own, so a stale tag can never
+  hijack rows belonging to a different account).
 - **Scheduled** is a first-class bill status for anything dated in the future:
   it is selectable in the bill form ("Scheduled — not due yet") and applied
   automatically to any unpaid bill whose due date has not arrived yet, so a

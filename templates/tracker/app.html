@@ -970,7 +970,7 @@
             <div class="modal-header"><h3 class="modal-title" id="modalTitle">Add New Bill</h3><button class="modal-close" onclick="closeModal()"><i class="fas fa-times"></i></button></div>
             <div class="modal-body">
                 <div class="form-group"><label class="form-label">Title <span style="font-size:11px;color:var(--text-muted);font-weight:400;">what you'll see everywhere</span></label><input type="text" class="form-input" id="billTitle" maxlength="80" placeholder='e.g., Car Payment'><p class="form-hint">Optional. Title imported bank bills once ("Car Payment") and every future import with the same description auto-links and shows this title.</p></div>
-                <div class="form-group"><label class="form-label">Name <span style="font-size:11px;color:var(--text-muted);font-weight:400;">raw bank description / identifier</span></label><input type="text" class="form-input" id="billName" placeholder="e.g., Electric Bill"><p class="form-hint">The raw line from your bank import is kept here for reference — the Title above is what the app displays.</p></div>
+                <div class="form-group"><label class="form-label">Name <span style="font-size:11px;color:var(--text-muted);font-weight:400;">raw bank description / identifier</span></label><input type="text" class="form-input" id="billName" placeholder="e.g., Electric Bill" oninput="updateBillNameKeyHint()"><p class="form-hint">The raw line from your bank import is kept here for reference — the Title above is what the app displays.</p><p class="form-hint" id="billNameKeyHint" style="margin-top:4px;"></p></div>
                 <div class="form-row">
                     <div class="form-group"><label class="form-label">Monthly Payment ($)</label><input type="number" class="form-input" id="billAmount" placeholder="0.00" step="0.01" min="0"></div>
                     <div class="form-group"><label class="form-label">Due Date</label><input type="date" class="form-input" id="billDueDate"></div>
@@ -1141,7 +1141,7 @@
                     <div id="bankMappingFields" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;"></div>
                     <label style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px;color:var(--text-secondary);margin-top:14px;cursor:pointer;">
                         <input type="checkbox" id="bankLooseMatch" checked onchange="bankUpdatePreview()" style="accent-color:var(--accent-blue);width:15px;height:15px;margin-top:2px;flex-shrink:0;">
-                        <span>Also auto-pay a bill when its name appears inside the bank description (unique match, 5+ letters) — e.g. a bill named <b>Netflix</b> catching "NETFLIX.COM 866-579-7172". Bills whose <b>Name</b> is the bank description itself always match, with or without this.</span>
+                        <span>Also auto-pay a bill when its name appears inside the bank description (unique match, 5+ characters) — e.g. a bill named <b>Netflix</b> catching "NETFLIX.COM 866-579-7172". Bills whose <b>Name</b> is the bank description itself always match, with or without this.</span>
                     </label>
                     <div id="bankImportSummary" style="margin:14px 0;"></div>
                     <div id="bankImportPreview"></div>
@@ -2528,6 +2528,7 @@
                 document.getElementById('billPreferredAccount').value='';
                 document.getElementById('recurringToggle').classList.add('active');document.getElementById('recurringYearlyToggle').classList.remove('active');pt.classList.remove('active');pf.style.display='none';
             }
+            updateBillNameKeyHint();
         }
         function closeModal() { document.getElementById('billModal').classList.remove('active');editingBillId=null; }
         function saveBill() {
@@ -3176,7 +3177,7 @@
             const cadence = !b.recurring ? 'One-off' : (b.yearly
                 ? `Yearly — every ${monthNames[orig.getMonth()]}`
                 : `Monthly — day ${orig.getDate()} of the month`);
-            const sig = b.matchKey || descMatchKey(b.name || '');
+            const sig = b.matchKey || bfMatchKey(b.name || '');
             document.getElementById('billDetailTitle').innerHTML = `<i class="fas ${cat.icon}" style="color:${colorMap[cat.color]};margin-right:8px;"></i>${bfEscapeHtml(billTitle(b))}`;
 
             const info = [
@@ -3824,6 +3825,24 @@
             const rows = (bankImportData.normalizedRows || rowsFile).slice().sort((a, b) => (a.date < b.date ? -1 : 1));
             const inT = rows.reduce((s, r) => s + r.credit, 0), outT = rows.reduce((s, r) => s + r.debit, 0);
             const autoLink = rows.filter(r => bfBillForRow(r.desc, r.note, bankLooseMatchEnabled()));
+            // Distinct match keys in this file: rows sharing a key are the same
+            // bill. Shown before importing so you can see exactly what will link.
+            const keyRows = {};
+            rows.forEach(r => {
+                const k = bfMatchKey(r.desc || r.note) || '(no key)';
+                keyRows[k] = keyRows[k] || { n: 0, bill: null };
+                keyRows[k].n++;
+                if (!keyRows[k].bill) keyRows[k].bill = bfBillForRow(r.desc, r.note, bankLooseMatchEnabled());
+            });
+            const keyEntries = Object.entries(keyRows).sort((a, b) => b[1].n - a[1].n);
+            const keysHtml = `<div style="margin-top:14px;">
+                <div class="settings-section-title" style="margin-bottom:6px;">Match keys found in this file</div>
+                <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:8px;">Rows sharing a key are treated as the same bill. Dates and long number runs (phone, SEQ#, check numbers) are ignored, but digits inside an account token are kept — so separate loans or accounts stay separate.</div>
+                <table class="bank-table"><thead><tr><th>Match key</th><th>Rows</th><th>Bill it pays</th></tr></thead><tbody>
+                ${keyEntries.slice(0, 12).map(([k, d]) => `<tr><td class="clip"><code style="font-size:11.5px;">${bfEscapeHtml(k)}</code></td><td>${d.n}</td><td>${d.bill ? bfEscapeHtml(billTitle(d.bill)) : '<span style="color:var(--text-muted);">no bill yet — tag one of these rows to create it</span>'}</td></tr>`).join('')}
+                </tbody></table>
+                ${keyEntries.length > 12 ? `<p style="font-size:11px;color:var(--text-muted);margin:6px 0 0;">…and ${keyEntries.length - 12} more key(s).</p>` : ''}
+            </div>`;
             const span = rows.length ? `${formatDate(rows[0].date)} → ${formatDate(rows[rows.length - 1].date)}` : '—';
             const cell = 'text-align:center;padding:10px;background:var(--bg-input);border-radius:var(--radius-sm);';
             document.getElementById('bankImportSummary').innerHTML = `<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
@@ -3831,9 +3850,9 @@
                 <div style="${cell}"><div style="font-size:11px;color:var(--text-muted);">Credits (in)</div><div style="font-size:16px;font-weight:800;color:var(--accent-green);">+${formatCurrency(inT)}</div></div>
                 <div style="${cell}"><div style="font-size:11px;color:var(--text-muted);">Debits (out)</div><div style="font-size:16px;font-weight:800;color:var(--accent-red);">-${formatCurrency(outT)}</div></div>
                 <div style="${cell}"><div style="font-size:11px;color:var(--text-muted);">Statement balance</div><div style="font-size:16px;font-weight:800;color:var(--accent-blue);">${bankImportData.finalBalance === null ? 'n/a' : formatCurrency(bankImportData.finalBalance)}</div></div></div>
-                <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0;">Span: ${span}. Credits become deposits, debits become bank transactions; rows already in the account are updated in place (posted amount/description wins), new rows are added, and debits matching an existing bill payment are skipped.${autoLink.length ? ` <b style="color:var(--accent-blue);">${autoLink.length} row(s) will auto-pay a bill</b> — matched on the bill's raw bank description (its Name), shown as “→ bill” below.` : ''}${bankImportData.finalBalance === null ? ' No Balance column — amounts apply on top of the current balance.' : ` Balance will be set to the statement balance (${formatCurrency(bankImportData.finalBalance)}${bankImportData.finalBalanceDate ? ', as of ' + formatDate(bankImportData.finalBalanceDate) : ''}).`}</p>`;
+                <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0;">Span: ${span}. Credits become deposits, debits become bank transactions; rows already in the account are updated in place (posted amount/description wins), new rows are added, and debits matching an existing bill payment are skipped.${autoLink.length ? ` <b style="color:var(--accent-blue);">${autoLink.length} row(s) will auto-pay a bill</b> — matched on the bill's raw bank description (its Name), shown as “→ bill” below.` : ''}${bankImportData.finalBalance === null ? ' No Balance column — amounts apply on top of the current balance.' : ` Balance will be set to the statement balance (${formatCurrency(bankImportData.finalBalance)}${bankImportData.finalBalanceDate ? ', as of ' + formatDate(bankImportData.finalBalanceDate) : ''}).`}</p>${keysHtml}`;
             const tail = rows.slice(-30).reverse();
-            document.getElementById('bankImportPreview').innerHTML = rows.length ? `<table class="bank-table"><thead><tr><th>Date</th><th>Description</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead><tbody>${tail.map(r => `<tr><td>${formatDate(r.date)}</td><td class="clip">${bfEscapeHtml(r.note)}${(() => { const mb = bfBillForRow(r.desc, r.note, bankLooseMatchEnabled()); return mb ? ` <span style="color:var(--accent-blue);">→ ${bfEscapeHtml(billTitle(mb))}</span>` : ''; })()}</td><td style="color:var(--accent-red);">${r.debit ? formatCurrency(r.debit) : ''}</td><td style="color:var(--accent-green);">${r.credit ? formatCurrency(r.credit) : ''}</td><td>${r.balance === null ? '' : formatCurrency(r.balance)}</td></tr>`).join('')}</tbody></table><p style="font-size:11px;color:var(--text-muted);margin:6px 0 0;">Showing the ${Math.min(30, rows.length)} most recent of ${rows.length} row(s).</p>` : '<p style="color:var(--accent-red);font-size:13px;">No rows with a valid date and amount were found — check the column mapping above.</p>';
+            document.getElementById('bankImportPreview').innerHTML = rows.length ? `<table class="bank-table"><thead><tr><th>Date</th><th>Description</th><th>Match key</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead><tbody>${tail.map(r => `<tr><td>${formatDate(r.date)}</td><td class="clip">${bfEscapeHtml(r.note)}${(() => { const mb = bfBillForRow(r.desc, r.note, bankLooseMatchEnabled()); return mb ? ` <span style="color:var(--accent-blue);">→ ${bfEscapeHtml(billTitle(mb))}</span>` : ''; })()}</td><td class="clip"><code style="font-size:11px;color:var(--text-secondary);">${bfEscapeHtml(bfMatchKey(r.desc || r.note) || '—')}</code></td><td style="color:var(--accent-red);">${r.debit ? formatCurrency(r.debit) : ''}</td><td style="color:var(--accent-green);">${r.credit ? formatCurrency(r.credit) : ''}</td><td>${r.balance === null ? '' : formatCurrency(r.balance)}</td></tr>`).join('')}</tbody></table><p style="font-size:11px;color:var(--text-muted);margin:6px 0 0;">Showing the ${Math.min(30, rows.length)} most recent of ${rows.length} row(s).</p>` : '<p style="color:var(--accent-red);font-size:13px;">No rows with a valid date and amount were found — check the column mapping above.</p>';
         }
         function applyBankImport() {
             if (viewOnlyMode()) { showToast('👁️ View-only access.', 'info'); return; }
@@ -3907,31 +3926,73 @@
         }
         // ============ ACTIVITY SEARCH + TAG AS BILL ============
         function activitySearchChanged(v) { activitySearch = v || ''; activitySelected.clear(); renderWithdrawalsList(); }
+        // Letters-only signature (legacy). Kept so bills tagged before
+        // digit-aware keys existed keep matching.
         function descMatchKey(s) { return String(s || '').toLowerCase().replace(/[^a-z]/g, ''); }
-        // Auto-link an imported bank row to a bill. Matching is driven by the
-        // bill's RAW bank description / identifier (its Name — e.g.
-        // "PURCHASE-SIG CARMAX 1234"), never the friendly Title. Descriptions
-        // are reduced to their letters-only signature, so reference numbers,
-        // dates and amounts in the bank text cannot break a match.
-        // Precedence: 1) the explicit signature set by "Tag as bill",
-        // 2) a bill whose Name has the same signature,
-        // 3) (opt-in) exactly one bill whose Name (5+ letters) appears inside
-        //    the description — e.g. a bill named "Netflix" catching
-        //    "NETFLIX.COM 866-579-7172".
+
+        // Bank match key: what actually identifies a transaction in a
+        // statement. Dates (10/09, 10/09/26, 2026-10-09) and standalone number
+        // runs of 3+ digits (phone numbers, SEQ#/check numbers, store numbers)
+        // are dropped because they change from row to row — but digits that are
+        // part of an identifier token are KEPT, so separate accounts stay
+        // separate. Examples:
+        //   "Signature POS Debit 10/09 VA 800-285-6609 VIRGINIA FEDERA ED SEQ# 075182 6484"
+        //      -> signatureposdebitvavirginiafederaedseq
+        //   "Signature POS Debit 09/25 VA 800-285-6609 VIRGINIA FEDERA ED SEQ# 074893 6484"
+        //      -> signatureposdebitvavirginiafederaedseq   (same bill, stable)
+        //   "AFFIRM.COM PAYME AFFIRM.COM ST-O7L8L7M0T5E2"
+        //      -> affirmcompaymeaffirmcomsto7l8l7m0t5e2
+        //   "AFFIRM.COM PAYME AFFIRM.COM ST-O7L8L7M0T5E3"
+        //      -> affirmcompaymeaffirmcomsto7l8l7m0t5e3   (different loan, different key)
+        function bfMatchKey(s) {
+            let t = String(s == null ? '' : s).toLowerCase();
+            t = t.replace(/\d{4}-\d{1,2}-\d{1,2}/g, ' ');          // ISO dates
+            t = t.replace(/\b\d{1,2}\/\d{1,2}(\/\d{2,4})?\b/g, ' '); // 10/09, 10/09/26
+            t = t.replace(/[a-z0-9]+/g, tok => (/^\d{3,}$/.test(tok) ? ' ' : tok)); // long number runs
+            return t.replace(/[^a-z0-9]/g, '');
+        }
+
+        // Auto-link an imported bank row to a bill, using the bill's RAW bank
+        // description / identifier (its Name) — never the friendly Title.
+        // Precedence:
+        //   1) a bill whose Name yields the same match key (the normal case),
+        //   2) a bill carrying the same explicit signature ("Tag as bill"),
+        //   3) a legacy letters-only tag, but only for a bill whose Name yields
+        //      no key of its own — so a precise Name always wins,
+        //   4) (opt-in) exactly one bill whose Name key (5+ chars) appears
+        //      inside the row's key.
         function bfBillForRow(desc, note, loose) {
-            const mk = descMatchKey(desc || note || '');
-            if (!mk) return null;
-            const explicit = bills.find(b => b.matchKey && b.matchKey === mk);
+            const raw = String(desc || note || '');
+            const key = bfMatchKey(raw);
+            const legacy = descMatchKey(raw);
+            if (!key && !legacy) return null;
+            const named = bills.find(b => { const nk = bfMatchKey(b.name || ''); return nk && nk === key; });
+            if (named) return named;
+            const explicit = bills.find(b => b.matchKey && b.matchKey === key);
             if (explicit) return explicit;
-            const exact = bills.find(b => descMatchKey(b.name || '') === mk);
-            if (exact) return exact;
-            if (!loose) return null;
-            const cands = bills.filter(b => { const nk = descMatchKey(b.name || ''); return nk.length >= 5 && mk.indexOf(nk) !== -1; });
+            const legacyTag = bills.find(b => b.matchKey && b.matchKey === legacy && !bfMatchKey(b.name || ''));
+            if (legacyTag) return legacyTag;
+            if (!loose || !key) return null;
+            const cands = bills.filter(b => { const nk = bfMatchKey(b.name || ''); return nk.length >= 5 && key.indexOf(nk) !== -1; });
             return cands.length === 1 ? cands[0] : null;
         }
         function bankLooseMatchEnabled() {
             const el = document.getElementById('bankLooseMatch');
             return !!(el && el.checked);
+        }
+        // Live feedback in the bill form: the key bank imports will match on,
+        // so a bill can be set up (or fixed) without any guesswork.
+        function updateBillNameKeyHint() {
+            const el = document.getElementById('billNameKeyHint');
+            if (!el) return;
+            const nameEl = document.getElementById('billName');
+            const key = bfMatchKey(nameEl ? nameEl.value : '');
+            const tagged = editingBillId ? ((bills.find(b => b.id === editingBillId) || {}).matchKey || '') : '';
+            if (key) {
+                el.innerHTML = `Imports match on this — key <code>${bfEscapeHtml(key)}</code>${tagged && tagged !== key ? ` · tagged signature <code>${bfEscapeHtml(tagged)}</code>` : ''}. Paste the bank's own line (or just its account token, e.g. an ST- code) and every future import with the same key auto-pays this bill.`;
+            } else {
+                el.innerHTML = 'Paste the bank description here (or its account token) so imports can auto-pay this bill without manual tagging.';
+            }
         }
         // A row that now auto-pays a bill may previously have been imported as
         // a plain bank transaction (matching was off, or the bill did not exist
@@ -3942,7 +4003,7 @@
             const debits = acc.debits || [];
             const idx = debits.findIndex(d => !addedDeb.has(d) && !claimedDeb.has(d)
                 && d.date === r.date && Math.abs((d.amount || 0) - r.debit) < 0.005
-                && ((d.note || '') === r.note || descMatchKey(d.note || '') === descMatchKey(r.note || '')));
+                && ((d.note || '') === r.note || bfMatchKey(d.note || '') === bfMatchKey(r.note || '')));
             if (idx === -1) return;
             claimedDeb.add(debits[idx]);
             debits.splice(idx, 1);
@@ -3967,7 +4028,7 @@
             document.getElementById('tagBillDesc').textContent = r.label;
             document.getElementById('tagBillDate').textContent = formatDate(r.date);
             document.getElementById('tagBillAmount').textContent = formatCurrency(r.amount);
-            const mk = r.matchKey || descMatchKey(r.note || r.label);
+            const mk = r.matchKey || bfMatchKey(r.note || r.label);
             document.getElementById('tagBillMatchKey').textContent = mk ? `"${mk}"` : '(description)';
             tagRawName = String(r.label || '').replace(/^#\S+\s*·\s*/, '').trim();
             document.getElementById('tagNewName').value = '';
@@ -3992,7 +4053,7 @@
             if (viewOnlyMode()) { showToast('👁️ View-only access.', 'info'); return; }
             const acc = accounts.find(a => a.id === tagAccId); if (!acc) return;
             const r = (currentActivityRows || [])[tagRowIndex]; if (!r) return;
-            const mk = r.matchKey || descMatchKey(r.note || r.label);
+            const mk = r.matchKey || bfMatchKey(r.note || r.label);
             let msg;
             if (tagMode === 'existing') {
                 const bill = bills.find(b => b.id === parseInt(document.getElementById('tagExistSelect').value));
