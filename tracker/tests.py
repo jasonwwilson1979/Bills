@@ -745,6 +745,52 @@ class TemplateScriptTests(TestCase):
         self.assertIn("r._bill.status = 'pending'", html)
         self.assertIn("b.status = 'pending'", html)
 
+    def test_activity_date_filters_are_month_and_year_dropdowns(self):
+        """Account Activity filters by date with a Month and a Year dropdown
+        (replacing the old year tabs), and the month filter only becomes active
+        once a specific year is chosen."""
+        from django.conf import settings
+
+        path = os.path.join(str(settings.BASE_DIR), 'templates', 'tracker', 'app.html')
+        with open(path, encoding='utf-8') as fh:
+            html = fh.read()
+        for needle in ('id="activityYearSelect"', 'id="activityMonthSelect"',
+                       'onchange="activityYearChanged(this.value)"',
+                       'onchange="activityMonthChanged(this.value)"',
+                       'function renderActivityDateFilters(',
+                       'function activityYearChanged(', 'function activityMonthChanged(',
+                       'let activityMonth',
+                       "monthEl.disabled = activityYear === 'all'",
+                       "activity.filter(r => (r.date || '').slice(5, 7) === String(activityMonth).padStart(2, '0'))"):
+            self.assertIn(needle, html)
+        # The old year-tab UI and its click handler are gone.
+        self.assertNotIn('id="withdrawalYearTabs"', html)
+        self.assertNotIn('function filterActivityByYear(', html)
+        self.assertNotIn('onclick="filterActivityByYear(', html)
+
+    def test_withdrawals_do_not_auto_link_on_import(self):
+        """Bank imports never auto-link a withdrawal to a bill unless the user
+        explicitly opts in: the auto-pay checkbox is off by default, every
+        auto-link call site goes through the gated resolver, and the resolver
+        returns null while auto-pay is off."""
+        from django.conf import settings
+
+        path = os.path.join(str(settings.BASE_DIR), 'templates', 'tracker', 'app.html')
+        with open(path, encoding='utf-8') as fh:
+            html = fh.read()
+        for needle in ('id="bankAutoLinkBills"', 'function bankAutoLinkEnabled(',
+                       'function bankRowBill(',
+                       'if (autoLink) autoLink.checked = false;',
+                       'if (!bankAutoLinkEnabled()) return null;'):
+            self.assertIn(needle, html)
+        # Import, the preview count, the per-row preview annotation and the key
+        # summary all use the gated resolver (so the preview cannot disagree
+        # with the import). One extra hit is the function definition itself.
+        self.assertEqual(html.count('bankRowBill(r)'), 5)
+        # The loose-substring fallback is nested under auto-pay.
+        self.assertIn('return bankAutoLinkEnabled() && !!(el && el.checked);', html)
+
+
     def test_yearly_recurring_toggle_exists(self):
         """Bills can recur yearly (same month each year) as well as monthly.
         The two form toggles are mutually exclusive, and the yearly flag
@@ -781,10 +827,10 @@ class TemplateScriptTests(TestCase):
         self.assertIn("document.getElementById('recurringYearlyToggle').classList.remove('active')", html)
 
     def test_bank_import_matches_bills_by_raw_description(self):
-        """Bank imports auto-link rows to bills using the bill's RAW bank
-        description / identifier (its Name) — never the friendly Title — with
-        an opt-in unique-substring fallback, and the preview shows which bill
-        each row will auto-pay before importing."""
+        """Bank imports can auto-link rows to bills using the bill's RAW bank
+        description / identifier (its Name) — never the friendly Title — but
+        only when the user opts in (off by default); the preview shows which
+        bill each row would auto-pay before importing."""
         from django.conf import settings
 
         path = os.path.join(str(settings.BASE_DIR), 'templates', 'tracker', 'app.html')
@@ -796,7 +842,10 @@ class TemplateScriptTests(TestCase):
                        "const named = bills.find(b => { const nk = bfMatchKey(b.name || ''); return nk && nk === key; });",
                        'nk.length >= 5 && key.indexOf(nk) !== -1',
                        'function bfDropSupersededDebit(',
-                       'if (loose) loose.checked = true;',
+                       'function bankAutoLinkEnabled(', 'function bankRowBill(',
+                       'id="bankAutoLinkBills"',
+                       'if (autoLink) autoLink.checked = false;',
+                       'if (loose) loose.checked = false;',
                        'bfDropSupersededDebit(acc, r, claimedDeb, addedDeb);',
                        'return cands.length === 1 ? cands[0] : null;'):
             self.assertIn(needle, html)
@@ -804,7 +853,7 @@ class TemplateScriptTests(TestCase):
         # Import, the preview count, the per-row preview annotation and the
         # key summary all use the same resolver (so the preview cannot disagree
         # with the import).
-        self.assertEqual(html.count('bfBillForRow(r.desc, r.note, bankLooseMatchEnabled())'), 4)
+        self.assertEqual(html.count('bankRowBill(r)'), 5)
         # The old match-signature-only lookup is gone everywhere.
         self.assertNotIn('bills.find(b => b.matchKey === mk)', html)
         self.assertNotIn('bills.some(b => b.matchKey === mk)', html)

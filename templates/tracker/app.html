@@ -969,7 +969,7 @@
         <div class="modal">
             <div class="modal-header"><h3 class="modal-title" id="modalTitle">Add New Bill</h3><button class="modal-close" onclick="closeModal()"><i class="fas fa-times"></i></button></div>
             <div class="modal-body">
-                <div class="form-group"><label class="form-label">Title <span style="font-size:11px;color:var(--text-muted);font-weight:400;">what you'll see everywhere</span></label><input type="text" class="form-input" id="billTitle" maxlength="80" placeholder='e.g., Car Payment'><p class="form-hint">Optional. Title imported bank bills once ("Car Payment") and every future import with the same description auto-links and shows this title.</p></div>
+                <div class="form-group"><label class="form-label">Title <span style="font-size:11px;color:var(--text-muted);font-weight:400;">what you'll see everywhere</span></label><input type="text" class="form-input" id="billTitle" maxlength="80" placeholder='e.g., Car Payment'><p class="form-hint">Optional. Title imported bank bills once ("Car Payment") and every future import with the same description auto-links and shows this title when auto-pay is enabled on import.</p></div>
                 <div class="form-group"><label class="form-label">Name <span style="font-size:11px;color:var(--text-muted);font-weight:400;">raw bank description / identifier</span></label><input type="text" class="form-input" id="billName" placeholder="e.g., Electric Bill" oninput="updateBillNameKeyHint()"><p class="form-hint">The raw line from your bank import is kept here for reference — the Title above is what the app displays.</p><p class="form-hint" id="billNameKeyHint" style="margin-top:4px;"></p></div>
                 <div class="form-row">
                     <div class="form-group"><label class="form-label">Monthly Payment ($)</label><input type="number" class="form-input" id="billAmount" placeholder="0.00" step="0.01" min="0"></div>
@@ -1135,13 +1135,17 @@
                     <label class="form-label">Bank statement (CSV)</label>
                     <input type="file" class="form-input" id="bankImportFile" accept=".csv,text/csv" onchange="handleBankFileSelect(this)">
                 </div>
-                <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 14px;">Re-importing is safe — rows already in this account are <b>updated in place</b> (posted amounts/descriptions win) and only new rows are added. Debits whose bank description matches a bill's <b>Name</b> (the raw bank description / identifier saved on that bill) are auto-paid onto that bill — no manual tagging needed. To start the account over, use <b>Clear transactions</b> in its activity view.</p>
+                <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 14px;">Re-importing is safe — rows already in this account are <b>updated in place</b> (posted amounts/descriptions win) and only new rows are added. Withdrawals (debits) import as plain bank transactions — they are <b>not</b> linked to a bill automatically. To turn a withdrawal into a bill payment, use <b>Tag as bill</b> in the account's activity view. To start the account over, use <b>Clear transactions</b> there too.</p>
                 <div id="bankImportSetup" style="display:none;">
                     <h3 class="settings-section-title">Column mapping</h3>
                     <div id="bankMappingFields" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;"></div>
                     <label style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px;color:var(--text-secondary);margin-top:14px;cursor:pointer;">
-                        <input type="checkbox" id="bankLooseMatch" checked onchange="bankUpdatePreview()" style="accent-color:var(--accent-blue);width:15px;height:15px;margin-top:2px;flex-shrink:0;">
-                        <span>Also auto-pay a bill when its name appears inside the bank description (unique match, 5+ characters) — e.g. a bill named <b>Netflix</b> catching "NETFLIX.COM 866-579-7172". Bills whose <b>Name</b> is the bank description itself always match, with or without this.</span>
+                        <input type="checkbox" id="bankAutoLinkBills" onchange="bankUpdatePreview()" style="accent-color:var(--accent-blue);width:15px;height:15px;margin-top:2px;flex-shrink:0;">
+                        <span>Auto-pay bills from matching withdrawals <b>(off by default)</b>. When on, a debit whose bank description matches a bill's <b>Name</b> (the raw bank description / identifier saved on that bill) is recorded as a payment on that bill instead of a plain bank transaction.</span>
+                    </label>
+                    <label style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px;color:var(--text-secondary);margin-top:10px;cursor:pointer;">
+                        <input type="checkbox" id="bankLooseMatch" onchange="bankUpdatePreview()" style="accent-color:var(--accent-blue);width:15px;height:15px;margin-top:2px;flex-shrink:0;">
+                        <span>…and also match when a bill's name appears <i>inside</i> the bank description (unique match, 5+ characters) — e.g. a bill named <b>Netflix</b> catching "NETFLIX.COM 866-579-7172". Only used when auto-pay above is on.</span>
                     </label>
                     <div id="bankImportSummary" style="margin:14px 0;"></div>
                     <div id="bankImportPreview"></div>
@@ -1195,7 +1199,10 @@
             </div>
             <div class="modal-body" style="max-height:65vh;overflow-y:auto;">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:8px;">
-                    <div class="filter-tabs" id="withdrawalYearTabs"></div>
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                        <select class="form-select" id="activityYearSelect" style="width:auto;min-width:120px;padding:8px 30px 8px 12px;" onchange="activityYearChanged(this.value)" title="Filter by year"></select>
+                        <select class="form-select" id="activityMonthSelect" style="width:auto;min-width:140px;padding:8px 30px 8px 12px;" onchange="activityMonthChanged(this.value)" title="Filter by month"></select>
+                    </div>
                     <div class="filter-tabs">
                         <button class="filter-tab active" onclick="sortActivity('date', this)">By Date</button>
                         <button class="filter-tab" onclick="sortActivity('amount', this)">By Amount</button>
@@ -2204,6 +2211,7 @@
 
         let currentWithdrawalAccountId = null;
         let activityYear = 'all';
+        let activityMonth = 'all';
         let activitySort = 'date';
         let activitySearch = '';
         let currentActivityRows = [];
@@ -2240,18 +2248,35 @@
             rows.sort((a, b) => (a.date < b.date ? 1 : -1));
             return rows;
         }
-        function renderWithdrawalYearTabs() {
-            const el = document.getElementById('withdrawalYearTabs');
-            if (!el || !currentWithdrawalAccountId) return;
+        const ACTIVITY_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+        // Date filter for the activity view: a Year dropdown (All time + the
+        // years present) and a Month dropdown (All months + Jan–Dec). The month
+        // dropdown only activates once a specific year is chosen, so "All time"
+        // still means the whole account history.
+        function renderActivityDateFilters() {
+            const yearEl = document.getElementById('activityYearSelect');
+            const monthEl = document.getElementById('activityMonthSelect');
+            if (!yearEl || !monthEl || !currentWithdrawalAccountId) return;
             const years = [...new Set(getAllAccountActivity(currentWithdrawalAccountId).map(r => (r.date || '').slice(0, 4)).filter(Boolean))].sort((a, b) => (a < b ? 1 : -1));
-            let html = `<button class="filter-tab ${activityYear === 'all' ? 'active' : ''}" onclick="filterActivityByYear('all', this)">All time</button>`;
-            years.forEach(y => { html += `<button class="filter-tab ${activityYear === y ? 'active' : ''}" onclick="filterActivityByYear('${y}', this)">${y}</button>`; });
-            el.innerHTML = html;
+            // If the chosen year vanished (transactions cleared/re-imported), fall back to all time.
+            if (activityYear !== 'all' && !years.includes(activityYear)) { activityYear = 'all'; activityMonth = 'all'; }
+            yearEl.innerHTML = `<option value="all">All time</option>`
+                + years.map(y => `<option value="${y}" ${activityYear === y ? 'selected' : ''}>${y}</option>`).join('');
+            monthEl.innerHTML = `<option value="all">All months</option>`
+                + ACTIVITY_MONTHS.map((m, i) => `<option value="${i + 1}" ${String(activityMonth) === String(i + 1) ? 'selected' : ''}>${m}</option>`).join('');
+            monthEl.disabled = activityYear === 'all';
+            monthEl.style.opacity = activityYear === 'all' ? '0.5' : '1';
         }
-        function filterActivityByYear(year, el) {
-            activityYear = year;
+        function activityYearChanged(year) {
+            activityYear = year || 'all';
+            if (activityYear === 'all') activityMonth = 'all';
             activitySelected.clear();
-            if (el) { el.parentElement.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active')); el.classList.add('active'); }
+            renderActivityDateFilters();
+            renderWithdrawalsList();
+        }
+        function activityMonthChanged(month) {
+            activityMonth = month || 'all';
+            activitySelected.clear();
             renderWithdrawalsList();
         }
         function sortActivity(sortBy, el) {
@@ -2268,6 +2293,7 @@
 
             let activity = getAllAccountActivity(account.id);
             if (activityYear !== 'all') activity = activity.filter(r => (r.date || '').slice(0, 4) === activityYear);
+            if (activityMonth !== 'all') activity = activity.filter(r => (r.date || '').slice(5, 7) === String(activityMonth).padStart(2, '0'));
             const q = activitySearch.trim().toLowerCase();
             if (q) activity = activity.filter(r => ((r.label || '') + ' ' + (r.note || '')).toLowerCase().includes(q));
             if (activitySort === 'date') activity.sort((a, b) => (a.date < b.date ? 1 : -1));
@@ -2338,10 +2364,10 @@
             const account = accounts.find(a => a.id === accountId);
             if (!account) return;
             document.getElementById('withdrawalsModalTitle').textContent = `${account.name} — Activity`;
-            activityYear = 'all'; activitySort = 'date'; activitySearch = '';
+            activityYear = 'all'; activityMonth = 'all'; activitySort = 'date'; activitySearch = '';
             activitySelected.clear();
             document.getElementById('activitySearch').value = '';
-            renderWithdrawalYearTabs(); renderWithdrawalsList();
+            renderActivityDateFilters(); renderWithdrawalsList();
             document.getElementById('withdrawalsModal').classList.add('active');
         }
 
@@ -2399,7 +2425,7 @@
             });
             activitySelected.clear();
             saveData(); renderAll();
-            renderWithdrawalYearTabs(); renderWithdrawalsList();
+            renderActivityDateFilters(); renderWithdrawalsList();
             showToast(`Deleted ${rows.length} transaction${rows.length === 1 ? '' : 's'}.`, 'success');
         }
         function clearAccountTransactions() {
@@ -2425,9 +2451,9 @@
                 if (!(b.payments || []).length) b.status = 'pending';
             });
             activitySelected.clear();
-            activityYear = 'all';
+            activityYear = 'all'; activityMonth = 'all';
             saveData(); renderAll();
-            renderWithdrawalYearTabs(); renderWithdrawalsList();
+            renderActivityDateFilters(); renderWithdrawalsList();
             showToast(`Cleared ${nDep + nDeb + nPay} transaction(s) from "${acc.name}".`, 'success');
         }
 
@@ -2448,7 +2474,7 @@
                     <div class="account-header"><div class="account-icon"><i class="fas ${accountIcons[a.type]||'fa-university'}"></i></div><div style="display:flex;gap:8px;"><button class="action-btn" style="background:rgba(59,130,246,0.15);color:var(--accent-blue);" onclick="openBankImportModal(${a.id})" title="Import bank data"><i class="fas fa-file-csv"></i></button><button class="action-btn" style="background:rgba(16,185,129,0.15);color:var(--accent-green);" onclick="openDepositModal(${a.id})" title="Deposit"><i class="fas fa-arrow-down"></i></button><button class="action-btn edit" onclick="editAccount(${a.id})" title="Edit"><i class="fas fa-pen"></i></button><button class="action-btn delete" onclick="deleteAccount(${a.id})" title="Delete"><i class="fas fa-trash"></i></button></div></div>
                     <div class="account-balance">${formatCurrency(a.balance)}</div><div class="account-name">${a.name}</div><div class="account-type">${a.type}</div>
                     <div class="account-withdrawals-summary">${withdrawals.length > 0 ? `${withdrawals.length} payment${withdrawals.length > 1 ? 's' : ''} · -${formatCurrency(totalWithdrawn)} total` : 'No payments yet'}${(a.deposits||[]).length ? ` · <span style="color:var(--accent-green);">${(a.deposits||[]).length} deposit${(a.deposits||[]).length > 1 ? 's' : ''}</span>` : ''}${(a.debits||[]).length ? ` · ${(a.debits||[]).length} bank transaction${(a.debits||[]).length > 1 ? 's' : ''}` : ''}</div>
-                    <div class="account-view-withdrawals" onclick="openWithdrawalsModal(${a.id})"><i class="fas fa-list"></i> View all activity by year</div>
+                    <div class="account-view-withdrawals" onclick="openWithdrawalsModal(${a.id})"><i class="fas fa-list"></i> View all activity</div>
                 </div>`;
             }).join('');
         }
@@ -3717,10 +3743,14 @@
             document.getElementById('bankImportBtn').style.display = 'none';
             document.getElementById('bankImportSummary').innerHTML = '';
             document.getElementById('bankImportPreview').innerHTML = '';
-            // Auto-matching by raw bank description is on by default for every
-            // import; untick it in the dialog for a conservative import.
+            // Withdrawals never auto-link to a bill by default. Auto-pay is an
+            // explicit opt-in per import (the unique-substring fallback nests
+            // under it), so a plain statement import only ever creates bank
+            // transactions — tag one afterwards to turn it into a bill payment.
+            const autoLink = document.getElementById('bankAutoLinkBills');
+            if (autoLink) autoLink.checked = false;
             const loose = document.getElementById('bankLooseMatch');
-            if (loose) loose.checked = true;
+            if (loose) loose.checked = false;
             document.getElementById('bankImportModal').classList.add('active');
         }
         function closeBankImportModal() { document.getElementById('bankImportModal').classList.remove('active'); bankImportAccId = null; bankImportData = null; }
@@ -3824,7 +3854,7 @@
             bankImportData.finalBalance = bankDetectFinalBalance(rowsFile);
             const rows = (bankImportData.normalizedRows || rowsFile).slice().sort((a, b) => (a.date < b.date ? -1 : 1));
             const inT = rows.reduce((s, r) => s + r.credit, 0), outT = rows.reduce((s, r) => s + r.debit, 0);
-            const autoLink = rows.filter(r => bfBillForRow(r.desc, r.note, bankLooseMatchEnabled()));
+            const autoLink = rows.filter(r => bankRowBill(r));
             // Distinct match keys in this file: rows sharing a key are the same
             // bill. Shown before importing so you can see exactly what will link.
             const keyRows = {};
@@ -3832,7 +3862,7 @@
                 const k = bfMatchKey(r.desc || r.note) || '(no key)';
                 keyRows[k] = keyRows[k] || { n: 0, bill: null };
                 keyRows[k].n++;
-                if (!keyRows[k].bill) keyRows[k].bill = bfBillForRow(r.desc, r.note, bankLooseMatchEnabled());
+                if (!keyRows[k].bill) keyRows[k].bill = bankRowBill(r);
             });
             const keyEntries = Object.entries(keyRows).sort((a, b) => b[1].n - a[1].n);
             const keysHtml = `<div style="margin-top:14px;">
@@ -3850,9 +3880,9 @@
                 <div style="${cell}"><div style="font-size:11px;color:var(--text-muted);">Credits (in)</div><div style="font-size:16px;font-weight:800;color:var(--accent-green);">+${formatCurrency(inT)}</div></div>
                 <div style="${cell}"><div style="font-size:11px;color:var(--text-muted);">Debits (out)</div><div style="font-size:16px;font-weight:800;color:var(--accent-red);">-${formatCurrency(outT)}</div></div>
                 <div style="${cell}"><div style="font-size:11px;color:var(--text-muted);">Statement balance</div><div style="font-size:16px;font-weight:800;color:var(--accent-blue);">${bankImportData.finalBalance === null ? 'n/a' : formatCurrency(bankImportData.finalBalance)}</div></div></div>
-                <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0;">Span: ${span}. Credits become deposits, debits become bank transactions; rows already in the account are updated in place (posted amount/description wins), new rows are added, and debits matching an existing bill payment are skipped.${autoLink.length ? ` <b style="color:var(--accent-blue);">${autoLink.length} row(s) will auto-pay a bill</b> — matched on the bill's raw bank description (its Name), shown as “→ bill” below.` : ''}${bankImportData.finalBalance === null ? ' No Balance column — amounts apply on top of the current balance.' : ` Balance will be set to the statement balance (${formatCurrency(bankImportData.finalBalance)}${bankImportData.finalBalanceDate ? ', as of ' + formatDate(bankImportData.finalBalanceDate) : ''}).`}</p>${keysHtml}`;
+                <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0;">Span: ${span}. Credits become deposits, debits become bank transactions (withdrawals never auto-link to a bill unless you enable it below); rows already in the account are updated in place (posted amount/description wins), new rows are added, and debits matching an existing bill payment are skipped.${bankAutoLinkEnabled() && autoLink.length ? ` <b style="color:var(--accent-blue);">${autoLink.length} row(s) will auto-pay a bill</b> — matched on the bill's raw bank description (its Name), shown as “→ bill” below.` : ''}${bankImportData.finalBalance === null ? ' No Balance column — amounts apply on top of the current balance.' : ` Balance will be set to the statement balance (${formatCurrency(bankImportData.finalBalance)}${bankImportData.finalBalanceDate ? ', as of ' + formatDate(bankImportData.finalBalanceDate) : ''}).`}</p>${keysHtml}`;
             const tail = rows.slice(-30).reverse();
-            document.getElementById('bankImportPreview').innerHTML = rows.length ? `<table class="bank-table"><thead><tr><th>Date</th><th>Description</th><th>Match key</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead><tbody>${tail.map(r => `<tr><td>${formatDate(r.date)}</td><td class="clip">${bfEscapeHtml(r.note)}${(() => { const mb = bfBillForRow(r.desc, r.note, bankLooseMatchEnabled()); return mb ? ` <span style="color:var(--accent-blue);">→ ${bfEscapeHtml(billTitle(mb))}</span>` : ''; })()}</td><td class="clip"><code style="font-size:11px;color:var(--text-secondary);">${bfEscapeHtml(bfMatchKey(r.desc || r.note) || '—')}</code></td><td style="color:var(--accent-red);">${r.debit ? formatCurrency(r.debit) : ''}</td><td style="color:var(--accent-green);">${r.credit ? formatCurrency(r.credit) : ''}</td><td>${r.balance === null ? '' : formatCurrency(r.balance)}</td></tr>`).join('')}</tbody></table><p style="font-size:11px;color:var(--text-muted);margin:6px 0 0;">Showing the ${Math.min(30, rows.length)} most recent of ${rows.length} row(s).</p>` : '<p style="color:var(--accent-red);font-size:13px;">No rows with a valid date and amount were found — check the column mapping above.</p>';
+            document.getElementById('bankImportPreview').innerHTML = rows.length ? `<table class="bank-table"><thead><tr><th>Date</th><th>Description</th><th>Match key</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead><tbody>${tail.map(r => `<tr><td>${formatDate(r.date)}</td><td class="clip">${bfEscapeHtml(r.note)}${(() => { const mb = bankRowBill(r); return mb ? ` <span style="color:var(--accent-blue);">→ ${bfEscapeHtml(billTitle(mb))}</span>` : ''; })()}</td><td class="clip"><code style="font-size:11px;color:var(--text-secondary);">${bfEscapeHtml(bfMatchKey(r.desc || r.note) || '—')}</code></td><td style="color:var(--accent-red);">${r.debit ? formatCurrency(r.debit) : ''}</td><td style="color:var(--accent-green);">${r.credit ? formatCurrency(r.credit) : ''}</td><td>${r.balance === null ? '' : formatCurrency(r.balance)}</td></tr>`).join('')}</tbody></table><p style="font-size:11px;color:var(--text-muted);margin:6px 0 0;">Showing the ${Math.min(30, rows.length)} most recent of ${rows.length} row(s).</p>` : '<p style="color:var(--accent-red);font-size:13px;">No rows with a valid date and amount were found — check the column mapping above.</p>';
         }
         function applyBankImport() {
             if (viewOnlyMode()) { showToast('👁️ View-only access.', 'info'); return; }
@@ -3886,8 +3916,9 @@
                     const nd = { date: r.date, amount: r.credit, note: r.note };
                     acc.deposits.push(nd); addedDep.add(nd); nIn++; inT += r.credit;
                 } else if (r.debit > 0) {
-                    // Auto-link by the bill's raw bank description (its Name)
-                    const mb = bfBillForRow(r.desc, r.note, bankLooseMatchEnabled());
+                    // Auto-link by the bill's raw bank description (its Name).
+                    // Gated by the per-import "auto-pay" opt-in — off by default.
+                    const mb = bankRowBill(r);
                     if (mb) {
                         mb.payments = mb.payments || [];
                         const pay = mb.payments.find(p => !claimedPay.has(p) && p.accountId === acc.id && p.date === r.date && (p.note || '') === r.note)
@@ -3976,9 +4007,24 @@
             const cands = bills.filter(b => { const nk = bfMatchKey(b.name || ''); return nk.length >= 5 && key.indexOf(nk) !== -1; });
             return cands.length === 1 ? cands[0] : null;
         }
+        // Auto-linking a withdrawal to a bill is an explicit opt-in per import.
+        // Off by default: a statement import must never silently turn a
+        // withdrawal into a bill payment.
+        function bankAutoLinkEnabled() {
+            const el = document.getElementById('bankAutoLinkBills');
+            return !!(el && el.checked);
+        }
+        // The unique-substring fallback only applies when auto-pay itself is on.
         function bankLooseMatchEnabled() {
             const el = document.getElementById('bankLooseMatch');
-            return !!(el && el.checked);
+            return bankAutoLinkEnabled() && !!(el && el.checked);
+        }
+        // Resolver shared by the import, the preview count, the per-row preview
+        // annotation and the key summary, so the preview can never disagree with
+        // what the import does. Returns null while auto-pay is off.
+        function bankRowBill(r) {
+            if (!bankAutoLinkEnabled()) return null;
+            return bfBillForRow(r.desc, r.note, bankLooseMatchEnabled());
         }
         // Live feedback in the bill form: the key bank imports will match on,
         // so a bill can be set up (or fixed) without any guesswork.
@@ -3989,9 +4035,9 @@
             const key = bfMatchKey(nameEl ? nameEl.value : '');
             const tagged = editingBillId ? ((bills.find(b => b.id === editingBillId) || {}).matchKey || '') : '';
             if (key) {
-                el.innerHTML = `Imports match on this — key <code>${bfEscapeHtml(key)}</code>${tagged && tagged !== key ? ` · tagged signature <code>${bfEscapeHtml(tagged)}</code>` : ''}. Paste the bank's own line (or just its account token, e.g. an ST- code) and every future import with the same key auto-pays this bill.`;
+                el.innerHTML = `Imports match on this — key <code>${bfEscapeHtml(key)}</code>${tagged && tagged !== key ? ` · tagged signature <code>${bfEscapeHtml(tagged)}</code>` : ''}. Paste the bank's own line (or just its account token, e.g. an ST- code) and, with auto-pay enabled on import, every future import with the same key pays this bill.`;
             } else {
-                el.innerHTML = 'Paste the bank description here (or its account token) so imports can auto-pay this bill without manual tagging.';
+                el.innerHTML = 'Paste the bank description here (or its account token) so imports can auto-pay this bill (enable auto-pay on the import dialog) without manual tagging.';
             }
         }
         // A row that now auto-pays a bill may previously have been imported as
@@ -4079,7 +4125,7 @@
             }
             acc.debits = (acc.debits || []).filter(d => !(d.date === r.date && Math.abs((d.amount || 0) - r.amount) < 0.005 && (d.note || '') === (r.note || '')));
             saveData(); closeTagBillModal(); renderAll();
-            if (currentWithdrawalAccountId) { renderWithdrawalYearTabs(); renderWithdrawalsList(); }
+            if (currentWithdrawalAccountId) { renderActivityDateFilters(); renderWithdrawalsList(); }
             showToast(msg, 'success');
         }
         // ============ SET BALANCE (the bank is the source of truth) ============
@@ -4117,7 +4163,7 @@
             }
             acc.balance = Math.round(target * 100) / 100;
             saveData(); closeSetBalanceModal(); renderAll();
-            if (currentWithdrawalAccountId) { renderWithdrawalYearTabs(); renderWithdrawalsList(); }
+            if (currentWithdrawalAccountId) { renderActivityDateFilters(); renderWithdrawalsList(); }
             showToast(`${acc.name} balance set to ${formatCurrency(acc.balance)} — the bank is now the source of truth.`, 'success');
         }
         function renderDebts() {
