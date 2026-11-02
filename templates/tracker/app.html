@@ -1181,8 +1181,9 @@
                     <div class="toggle-group" style="margin-bottom:10px;"><div class="toggle" id="tagNewYearly" onclick="tagRecurringMode('yearly')"></div><span class="toggle-label">Recurring yearly — same month each year</span></div>
                 </div>
                 <div id="tagExistPanel" style="display:none;">
+                    <div class="form-group"><label class="form-label">Search bills</label><input type="search" class="form-input" id="tagExistSearch" placeholder="🔍 Filter by name, title or category…" oninput="tagExistSearchChanged(this.value)"></div>
                     <div class="form-group"><label class="form-label">Choose bill</label><select class="form-select" id="tagExistSelect"></select></div>
-                    <p style="font-size:12px;color:var(--text-muted);">This transaction will be recorded as a payment on that bill.</p>
+                    <p style="font-size:12px;color:var(--text-muted);" id="tagExistHint">This transaction will be recorded as a payment on that bill.</p>
                 </div>
                 <p style="font-size:12px;color:var(--text-muted);">Match signature: <b id="tagBillMatchKey"></b> — future bank imports with the same description will automatically be recorded against this bill.</p>
             </div>
@@ -4066,6 +4067,38 @@
         let tagMode = 'new';
         let tagAccId = null;
         let tagRawName = '';   // raw bank description kept as the bill's name
+        let tagExistFilter = '';   // live filter for the "Link to existing bill" picker
+        // Label for one bill in the picker. Shows the bill's OWN amount — never
+        // planBillRemaining(), which is 0 for any bill already marked paid (so
+        // every settled bill used to read "$0/mo"). The cadence follows the
+        // bill's monthly/yearly setting, and the raw bank description is shown
+        // too when it differs from the title, to make the right bill obvious.
+        function tagBillOptionLabel(b) {
+            const cadence = billIsYearly(b) ? '/yr' : '/mo';
+            let label = `${billTitle(b)} — ${formatCurrency(b.amount || 0)}${cadence}`;
+            const raw = String(b.name || '');
+            if (raw && raw !== billTitle(b)) label += ` · ${raw.length > 34 ? raw.slice(0, 33) + '…' : raw}`;
+            return label;
+        }
+        function renderTagExistOptions() {
+            const sel = document.getElementById('tagExistSelect');
+            if (!sel) return;
+            const q = tagExistFilter.trim().toLowerCase();
+            const list = bills.slice()
+                .sort((a, b) => billTitle(a).localeCompare(billTitle(b)))
+                .filter(b => !q || (billTitle(b) + ' ' + (b.name || '') + ' ' + (b.category || '')).toLowerCase().includes(q));
+            const prev = sel.value;
+            sel.innerHTML = list.length
+                ? list.map(b => `<option value="${b.id}">${bfEscapeHtml(tagBillOptionLabel(b))}</option>`).join('')
+                : (bills.length ? '<option value="">No bills match your search</option>' : '<option value="">No bills yet</option>');
+            if (list.some(b => String(b.id) === prev)) sel.value = prev;
+            const hint = document.getElementById('tagExistHint');
+            if (hint) hint.textContent = !bills.length
+                ? 'No bills yet — use "Create new bill" instead.'
+                : (q ? `${list.length} bill${list.length === 1 ? '' : 's'} match "${tagExistFilter.trim()}".`
+                     : 'This transaction will be recorded as a payment on that bill.');
+        }
+        function tagExistSearchChanged(v) { tagExistFilter = v || ''; renderTagExistOptions(); }
         function openTagBillModal(idx) {
             const r = (currentActivityRows || [])[idx];
             if (!r || r.type !== 'out') return;
@@ -4083,8 +4116,10 @@
             document.getElementById('tagNewCategory').value = 'other';
             document.getElementById('tagNewRecurring').classList.add('active');
             document.getElementById('tagNewYearly').classList.remove('active');
-            const sel = document.getElementById('tagExistSelect');
-            sel.innerHTML = bills.slice().sort((a, b) => billTitle(a).localeCompare(billTitle(b))).map(b => `<option value="${b.id}">${bfEscapeHtml(billTitle(b))} (${formatCurrency(planBillRemaining(b))}/mo)</option>`).join('');
+            tagExistFilter = '';
+            const existSearch = document.getElementById('tagExistSearch');
+            if (existSearch) existSearch.value = '';
+            renderTagExistOptions();
             setTagMode('new', document.getElementById('tagModeNewBtn'));
             document.getElementById('tagBillModal').classList.add('active');
         }
@@ -4093,6 +4128,7 @@
             document.getElementById('tagNewPanel').style.display = mode === 'new' ? 'block' : 'none';
             document.getElementById('tagExistPanel').style.display = mode === 'existing' ? 'block' : 'none';
             if (el) { el.parentElement.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active')); el.classList.add('active'); }
+            if (mode === 'existing') { const s = document.getElementById('tagExistSearch'); if (s) s.focus(); }
         }
         function closeTagBillModal() { document.getElementById('tagBillModal').classList.remove('active'); tagRowIndex = null; }
         function applyTagBill() {
@@ -4103,7 +4139,7 @@
             let msg;
             if (tagMode === 'existing') {
                 const bill = bills.find(b => b.id === parseInt(document.getElementById('tagExistSelect').value));
-                if (!bill) { showToast('Choose a bill.', 'error'); return; }
+                if (!bill) { showToast('Pick a bill from the list (clear the search if it is empty).', 'error'); return; }
                 recordTaggedPayment(bill, r, acc);
                 if (!bill.matchKey) bill.matchKey = mk;
                 msg = `Payment recorded on "${billTitle(bill)}".`;

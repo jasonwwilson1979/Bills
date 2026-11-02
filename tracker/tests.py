@@ -790,6 +790,26 @@ class TemplateScriptTests(TestCase):
         # The loose-substring fallback is nested under auto-pay.
         self.assertIn('return bankAutoLinkEnabled() && !!(el && el.checked);', html)
 
+    def test_tag_existing_bill_picker_shows_amount_and_is_searchable(self):
+        """The 'Link to existing bill' picker shows each bill's OWN amount (not
+        the planner's paid-aware remaining, which reads $0 once a bill is paid)
+        and offers a live search box to filter the bill list."""
+        from django.conf import settings
+
+        path = os.path.join(str(settings.BASE_DIR), 'templates', 'tracker', 'app.html')
+        with open(path, encoding='utf-8') as fh:
+            html = fh.read()
+        for needle in ('id="tagExistSearch"', 'oninput="tagExistSearchChanged(this.value)"',
+                       'id="tagExistHint"', 'function tagExistSearchChanged(',
+                       'function renderTagExistOptions(', 'function tagBillOptionLabel(',
+                       'let tagExistFilter',
+                       "const cadence = billIsYearly(b) ? '/yr' : '/mo';",
+                       'renderTagExistOptions();'):
+            self.assertIn(needle, html)
+        # The picker no longer shows the paid-aware planner remaining ($0/mo on
+        # settled bills); it uses the bill's own amount.
+        self.assertNotIn('formatCurrency(planBillRemaining(b))}/mo', html)
+        self.assertIn('formatCurrency(b.amount || 0)', html)
 
     def test_yearly_recurring_toggle_exists(self):
         """Bills can recur yearly (same month each year) as well as monthly.
