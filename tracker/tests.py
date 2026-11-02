@@ -804,6 +804,7 @@ class TemplateScriptTests(TestCase):
                        'function renderTagExistOptions(', 'function tagBillOptionLabel(',
                        'let tagExistFilter',
                        "const cadence = billIsYearly(b) ? '/yr' : '/mo';",
+                       "const due = b.dueDate ? ` · due ${formatDate(b.dueDate)}` : '';",
                        'renderTagExistOptions();'):
             self.assertIn(needle, html)
         # The picker no longer shows the paid-aware planner remaining ($0/mo on
@@ -829,17 +830,16 @@ class TemplateScriptTests(TestCase):
                        "onclick=\"tagRecurringMode('yearly')\"",
                        'function billRecurringMode(', 'function tagRecurringMode(',
                        'function setRecurringMode(', 'function billIsYearly(',
-                       'function bfBillDueInMonth(', 'function bfMonthlyRecurringTotal(',
-                       'function bfYearlyTotalForMonth(',
+                       'function bfBillDueInMonth(', 'function bfBillsInMonth(',
                        'recurring,yearly,isPayoff',
                        'recurring: !!r.recurring, yearly: !!r.yearly',
                        "b.recurring?(b.yearly?'Yearly':'Monthly'):'No'",
-                       'bfYearlyTotalForMonth(d.getMonth())',
+                       'bfBillsInMonth(d.getFullYear(), d.getMonth())',
                        "yearly=document.getElementById('recurringYearlyToggle')",
                        'recurring=monthlyOn||yearly',
                        'const recurring = monthlyOn || yearly;',
                        'const yearly = !!b.yearly;',
-                       'if (b.yearly) return billMonth === m && billYear <= y;'):
+                       'if (b.yearly) return billMonth === monthIndex && billYear <= year;'):
             self.assertIn(needle, html)
         # Mutual exclusion: turning one toggle on clears the other.
         self.assertIn("if (on.classList.contains('active')) off.classList.remove('active');", html)
@@ -959,6 +959,61 @@ class TemplateScriptTests(TestCase):
         # Detaching reverts the bill like Unpay does (status + payoff).
         self.assertIn("if (!bill.payments.length) bill.status = 'pending';", html)
         self.assertIn("if (bill.isPayoff) bill.paidAmount = Math.max(0, (bill.paidAmount || 0) - (p.amount || 0));", html)
+
+
+    def test_dashboard_amounts_are_this_month_and_real(self):
+        """The dashboard cards are all about the CURRENT calendar month and use
+        the same per-month status the Bills page uses, so 'Total Monthly Bills'
+        equals 'Paid This Month' + 'Pending Bills' (the stored bill.status only
+        reflects the last payment, which is why a recurring bill paid last month
+        used to read as paid this month). Every chart is driven by real bill
+        data — no placeholder or random numbers."""
+        from django.conf import settings
+
+        path = os.path.join(str(settings.BASE_DIR), 'templates', 'tracker', 'app.html')
+        with open(path, encoding='utf-8') as fh:
+            html = fh.read()
+        for needle in ('function bfBillsInMonth(',
+                       'const monthBills = bfBillsInMonth(y, m);',
+                       'const stOf = b => billMonthStatus(b, y, m);',
+                       'const total = monthBills.reduce((s, b) => s + (b.amount || 0), 0);',
+                       "const paid = monthBills.filter(b => stOf(b) === 'paid')",
+                       "const pending = monthBills.filter(b => stOf(b) !== 'paid')",
+                       'return bfBillsInMonth(billsViewDate.getFullYear(), billsViewDate.getMonth());',
+                       'document.getElementById(\'donutTotal\').textContent=formatCurrency(total);'):
+            self.assertIn(needle, html)
+        # One shared definition of "a month's bills" drives the Bills page month
+        # summary, the dashboard cards and all four charts.
+        self.assertGreaterEqual(html.count('bfBillsInMonth('), 7)
+        # The placeholder data that made the dashboard look wrong is gone.
+        self.assertNotIn('Math.random()', html)
+        self.assertNotIn("['Jul','Aug','Sep','Oct','Nov','Dec'],v=[2450", html)
+        # The donut guards against dividing by zero on an empty month.
+        self.assertIn('if (!total) {', html)
+
+    def test_search_bars_match_amounts_and_dates(self):
+        """Both search boxes match anything: name/title, note, category, bill
+        type, amount in raw and formatted form, and the date in ISO and display
+        form, with multi-word AND queries."""
+        from django.conf import settings
+
+        path = os.path.join(str(settings.BASE_DIR), 'templates', 'tracker', 'app.html')
+        with open(path, encoding='utf-8') as fh:
+            html = fh.read()
+        for needle in ('function bfMatchesQuery(',
+                       'return terms.every(t => h.includes(t));',
+                       'function bfAmountTerms(',
+                       "return `${n} ${n.toFixed(2)} ${formatCurrency(n)} ${Math.abs(n)}`;",
+                       'function bfBillSearchHaystack(',
+                       'function bfActivitySearchHaystack(',
+                       'bfMatchesQuery(bfBillSearchHaystack(b), s)',
+                       'bfMatchesQuery(bfActivitySearchHaystack(r), q)',
+                       'bfAmountTerms(b.amount)',
+                       'bfAmountTerms(r.amount)',
+                       'bfMatchesQuery(tagBillOptionLabel(b)'):
+            self.assertIn(needle, html)
+        # Both boxes advertise the wider search.
+        self.assertIn('Search anything', html)
 
 
     def test_bank_match_key_keeps_account_tokens_but_ignores_volatile_parts(self):

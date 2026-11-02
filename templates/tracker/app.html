@@ -653,7 +653,7 @@
                             <div class="month-nav-divider"></div>
                             <button class="btn-current-month" id="btnCurrentMonth" onclick="goToCurrentMonth()"><i class="fas fa-calendar-day"></i> Current</button>
                         </div>
-                        <div class="search-input"><i class="fas fa-search"></i><input type="text" class="form-input" placeholder="Search bills..." id="searchBills" oninput="renderAllBills()" style="width:200px;"></div>
+                        <div class="search-input"><i class="fas fa-search"></i><input type="text" class="form-input" placeholder="Search anything — name, amount, date…" id="searchBills" oninput="renderAllBills()" style="width:200px;"></div>
                         <button class="btn btn-primary" onclick="openModal()"><i class="fas fa-plus"></i> Add Bill</button>
                     </div>
                 </div>
@@ -1181,7 +1181,7 @@
                     <div class="toggle-group" style="margin-bottom:10px;"><div class="toggle" id="tagNewYearly" onclick="tagRecurringMode('yearly')"></div><span class="toggle-label">Recurring yearly — same month each year</span></div>
                 </div>
                 <div id="tagExistPanel" style="display:none;">
-                    <div class="form-group"><label class="form-label">Search bills</label><input type="search" class="form-input" id="tagExistSearch" placeholder="🔍 Filter by name, title or category…" oninput="tagExistSearchChanged(this.value)"></div>
+                    <div class="form-group"><label class="form-label">Search bills</label><input type="search" class="form-input" id="tagExistSearch" placeholder="🔍 Filter by name, amount or due date…" oninput="tagExistSearchChanged(this.value)"></div>
                     <div class="form-group"><label class="form-label">Choose bill</label><select class="form-select" id="tagExistSelect"></select></div>
                     <p style="font-size:12px;color:var(--text-muted);" id="tagExistHint">This transaction will be recorded as a payment on that bill.</p>
                 </div>
@@ -1209,7 +1209,7 @@
                         <button class="filter-tab" onclick="sortActivity('amount', this)">By Amount</button>
                     </div>
                 </div>
-                <div style="margin-bottom:20px;"><input type="search" class="form-input" id="activitySearch" placeholder="🔍 Search this account's activity…" style="width:100%;" oninput="activitySearchChanged(this.value)"></div>
+                <div style="margin-bottom:20px;"><input type="search" class="form-input" id="activitySearch" placeholder="🔍 Search anything — name, amount, date, note…" style="width:100%;" oninput="activitySearchChanged(this.value)"></div>
                 <div id="withdrawalsSummary" style="margin-bottom:20px;padding:16px;background:var(--bg-card);border-radius:var(--radius-md);border:1px solid var(--border-color);"></div>
                 <div id="withdrawalsList"></div>
             </div>
@@ -1646,20 +1646,34 @@
             updateStats(); updateBadge(); updateBulkBar(); initMonthNavigator();
         }
 
+        // The dashboard cards are all about the CURRENT calendar month, and use
+        // the same per-month status the Bills page uses (billMonthStatus). The
+        // stored b.status only reflects the LAST payment, so a recurring bill
+        // paid last month used to still read as "Paid This Month", and
+        // "Total Monthly Bills" summed every bill ever (including yearly bills
+        // at their full yearly amount). Now the three cards add up:
+        //   total === paid + pending, for this month only.
         function updateStats() {
-            const total=bills.reduce((s,b)=>s+b.amount,0);
-            // Monthly summaries: a yearly bill only counts in its own month.
-            const nowMonth=new Date().getMonth();
-            const paid=bills.filter(b=>b.status==='paid'&&bfBillDueInMonth(b,nowMonth)).reduce((s,b)=>s+b.amount,0);
-            const pending=bills.filter(b=>b.status!=='paid'&&bfBillDueInMonth(b,nowMonth)).reduce((s,b)=>s+b.amount,0);
-            const debt=bills.filter(b=>b.isPayoff).reduce((s,b)=>s+Math.max(0,b.totalOwed-b.paidAmount),0);
-            document.getElementById('totalBills').textContent=formatCurrency(total);
-            document.getElementById('paidBills').textContent=formatCurrency(paid);
-            document.getElementById('pendingBills').textContent=formatCurrency(pending);
-            document.getElementById('remainingDebt').textContent=formatCurrency(debt);
-            document.getElementById('donutTotal').textContent=formatCurrency(total);
+            const now = new Date();
+            const y = now.getFullYear(), m = now.getMonth();
+            const monthBills = bfBillsInMonth(y, m);
+            const stOf = b => billMonthStatus(b, y, m);
+            const total = monthBills.reduce((s, b) => s + (b.amount || 0), 0);
+            const paid = monthBills.filter(b => stOf(b) === 'paid').reduce((s, b) => s + (b.amount || 0), 0);
+            const pending = monthBills.filter(b => stOf(b) !== 'paid').reduce((s, b) => s + (b.amount || 0), 0);
+            const debt = bills.filter(b => b.isPayoff).reduce((s, b) => s + Math.max(0, (b.totalOwed || 0) - (b.paidAmount || 0)), 0);
+            document.getElementById('totalBills').textContent = formatCurrency(total);
+            document.getElementById('paidBills').textContent = formatCurrency(paid);
+            document.getElementById('pendingBills').textContent = formatCurrency(pending);
+            document.getElementById('remainingDebt').textContent = formatCurrency(debt);
         }
-        function updateBadge() { const nowMonth=new Date().getMonth(); document.getElementById('pendingBadge').textContent=bills.filter(b=>b.status!=='paid'&&bfBillDueInMonth(b,nowMonth)).length; }
+        // Badge = bills still owing this month (pending + overdue + scheduled).
+        function updateBadge() {
+            const now = new Date();
+            document.getElementById('pendingBadge').textContent =
+                bfBillsInMonth(now.getFullYear(), now.getMonth())
+                    .filter(b => billMonthStatus(b, now.getFullYear(), now.getMonth()) !== 'paid').length;
+        }
 
         function getPayoffHTML(bill) {
             if(!bill.isPayoff) return '';
@@ -1775,37 +1789,31 @@
         }
         function billRecurringMode(mode) { setRecurringMode('recurringToggle', 'recurringYearlyToggle', mode); }
         function tagRecurringMode(mode) { setRecurringMode('tagNewRecurring', 'tagNewYearly', mode); }
-        // True when the bill's occurrence falls in the given month index
-        // (yearly bills only occur in their own month; everything else counts).
-        function bfBillDueInMonth(b, monthIndex) {
-            if (!billIsYearly(b)) return true;
-            const d = new Date(b.dueDate + 'T00:00:00');
-            return !isNaN(d.getTime()) && d.getMonth() === monthIndex;
+        // True when the bill has an occurrence in the given calendar month:
+        //   • yearly bills only in their own month (from their start year on),
+        //   • monthly bills from their start month onward,
+        //   • one-off bills only in their exact month.
+        function bfBillDueInMonth(b, year, monthIndex) {
+            const d = b.dueDate ? new Date(b.dueDate + 'T00:00:00') : null;
+            if (!d || isNaN(d.getTime())) return false;
+            const billMonth = d.getMonth(), billYear = d.getFullYear();
+            if (b.recurring) {
+                if (b.yearly) return billMonth === monthIndex && billYear <= year;
+                return billYear < year || (billYear === year && billMonth <= monthIndex);
+            }
+            return billMonth === monthIndex && billYear === year;
         }
-        function bfMonthlyRecurringTotal() {
-            return bills.filter(b => b.recurring && !b.yearly).reduce((s, b) => s + (b.amount || 0), 0);
-        }
-        function bfYearlyTotalForMonth(monthIndex) {
-            return bills.filter(b => b.recurring && b.yearly && b.dueDate && new Date(b.dueDate + 'T00:00:00').getMonth() === monthIndex)
-                .reduce((s, b) => s + (b.amount || 0), 0);
+
+        // The bills that fall in a given calendar month. This is the ONE
+        // definition of "a month's bills" used by the Bills page month summary,
+        // the dashboard stat cards and every dashboard chart, so they can never
+        // disagree.
+        function bfBillsInMonth(y, m) {
+            return bills.filter(b => bfBillDueInMonth(b, y, m));
         }
 
         function getBillsForViewMonth() {
-            const m = billsViewDate.getMonth();
-            const y = billsViewDate.getFullYear();
-            return bills.filter(b => {
-                const d = new Date(b.dueDate + 'T00:00:00');
-                const billMonth = d.getMonth();
-                const billYear = d.getFullYear();
-
-                if (b.recurring) {
-                    // Yearly bills only occur in their own month, once a year,
-                    // from their start date onward.
-                    if (b.yearly) return billMonth === m && billYear <= y;
-                    return billYear < y || (billYear === y && billMonth <= m);
-                }
-                return billMonth === m && billYear === y;
-            });
+            return bfBillsInMonth(billsViewDate.getFullYear(), billsViewDate.getMonth());
         }
 
         function bfIsoDate(d) {
@@ -1904,15 +1912,53 @@
             return { date: bfIsoDate(d), st: 'scheduled' };
         }
 
+        // ===== "SEARCH ANYTHING" =====
+        // Shared by the bills and account-activity search boxes. The query is
+        // split on spaces and EVERY term must appear somewhere in the haystack
+        // (case-insensitive), so "chase 150 nov" narrows by any combination of
+        // name/amount/date. Amounts are in raw ("150", "150.00") AND formatted
+        // ("$150", "$1,500") form, and dates in both ISO and display form, so
+        // typing any of them finds the row.
+        function bfMatchesQuery(haystack, query) {
+            const h = String(haystack == null ? '' : haystack).toLowerCase();
+            const terms = String(query == null ? '' : query).trim().toLowerCase().split(/\s+/).filter(Boolean);
+            return terms.every(t => h.includes(t));
+        }
+        function bfAmountTerms(amount) {
+            const n = Number(amount) || 0;
+            return `${n} ${n.toFixed(2)} ${formatCurrency(n)} ${Math.abs(n)}`;
+        }
+        function bfBillSearchHaystack(b) {
+            const cfg = categoryConfig[b.category] || categoryConfig.other || {};
+            return [
+                billTitle(b), b.name || '', b.category || '', cfg.label || '',
+                bfAmountTerms(b.amount),
+                b.dueDate || '', b.dueDate ? formatDate(b.dueDate) : '',
+                b.status || '', b.notes || '', b.matchKey || '',
+                b.recurring ? (b.yearly ? 'recurring yearly' : 'recurring monthly') : 'one-off',
+                b.isPayoff ? 'payoff debt' : ''
+            ].join(' ');
+        }
+        function bfActivitySearchHaystack(r) {
+            const cfg = r.category ? (categoryConfig[r.category] || categoryConfig.other || {}) : {};
+            const typeLabel = r.source === 'deposit' ? 'Deposit' : r.source === 'bank' ? 'Bank transaction' : 'Bill payment';
+            return [
+                r.label || '', r.note || '', r.billName || '', r.category || '', cfg.label || '', typeLabel,
+                bfAmountTerms(r.amount),
+                r.date || '', r.date ? formatDate(r.date) : '',
+                r.matchKey || ''
+            ].join(' ');
+        }
+
         function renderAllBills() {
             const c = document.getElementById('allBillsContainer');
-            const s = document.getElementById('searchBills')?.value?.toLowerCase() || '';
+            const s = document.getElementById('searchBills')?.value || '';
             const monthBills = getBillsForViewMonth();
             const view = { y: billsViewDate.getFullYear(), m: billsViewDate.getMonth() };
 
             let f = monthBills.filter(b => {
                 const matchFilter = currentFilter === 'all' || billMonthStatus(b, view.y, view.m) === currentFilter;
-                const matchSearch = billTitle(b).toLowerCase().includes(s) || b.name.toLowerCase().includes(s) || b.category.includes(s);
+                const matchSearch = bfMatchesQuery(bfBillSearchHaystack(b), s);
                 return matchFilter && matchSearch;
             });
 
@@ -1924,7 +1970,7 @@
             renderMonthSummary(monthBills);
 
             c.innerHTML = f.length ? f.map(b => renderBillRow(b, view)).join('') :
-                `<div class="empty-state"><i class="fas fa-calendar-times"></i><h3>No bills for ${monthNames[billsViewDate.getMonth()]} ${billsViewDate.getFullYear()}</h3><p>Try navigating to a different month or add a new bill.</p></div>`;
+                `<div class="empty-state"><i class="fas fa-calendar-times"></i><h3>No bills for ${monthNames[billsViewDate.getMonth()]} ${billsViewDate.getFullYear()}</h3><p>${s.trim() ? 'Nothing matches your search in this month — try clearing it or browsing another month.' : 'Try navigating to a different month or add a new bill.'}</p></div>`;
         }
 
         function renderMonthSummary(monthBills) {
@@ -1984,19 +2030,48 @@
 
         function renderTimeline() {
             const c=document.getElementById('timelineContainer');
-            const now=new Date();
-            const w=bills.filter(b=>{const d=new Date(b.dueDate);const diff=(d-now)/(864e5);return diff>=-1&&diff<=7;}).sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate));
-            c.innerHTML=w.length?w.map(b=>{const cat=categoryConfig[b.category]||categoryConfig.other;return `<div class="timeline-item" onclick="editBill(${b.id})"><div class="timeline-dot ${cat.color}"></div><div class="timeline-content"><h4>${bfEscapeHtml(billTitle(b))}</h4><p>${formatDate(b.dueDate)} · ${cat.label}</p></div><div class="timeline-amount">${formatCurrency(b.amount)}</div></div>`;}).join(''):`<div class="empty-state" style="padding:30px;"><i class="fas fa-calendar-check" style="font-size:32px;"></i><h3>No bills this week</h3><p>You're all clear!</p></div>`;
+            const today=new Date(); today.setHours(0,0,0,0);
+            const rows=[];
+            bills.forEach(b => {
+                // Recurring bills roll forward to their next occurrence, so a
+                // monthly bill due back in January still shows up this week.
+                const occ = b.recurring ? planOccurrence(b) : { date: b.dueDate };
+                const d = occ && occ.date ? new Date(occ.date + 'T00:00:00') : null;
+                if (!d || isNaN(d.getTime())) return;
+                const diff = (d - today) / 864e5;
+                if (diff >= -1 && diff <= 7) rows.push({ b: b, date: occ.date });
+            });
+            rows.sort((a,b2) => (a.date < b2.date ? -1 : 1));
+            c.innerHTML=rows.length?rows.map(r=>{const b=r.b,cat=categoryConfig[b.category]||categoryConfig.other;return `<div class="timeline-item" onclick="editBill(${b.id})"><div class="timeline-dot ${cat.color}"></div><div class="timeline-content"><h4>${bfEscapeHtml(billTitle(b))}</h4><p>${formatDate(r.date)} · ${cat.label}</p></div><div class="timeline-amount">${formatCurrency(b.amount)}</div></div>`;}).join(''):`<div class="empty-state" style="padding:30px;"><i class="fas fa-calendar-check" style="font-size:32px;"></i><h3>No bills this week</h3><p>You're all clear!</p></div>`;
         }
+        // Real bill totals for the last 6 calendar months. (This chart used to
+        // be hard-coded placeholder data — Jul–Dec with fixed values — so it
+        // never reflected the user's actual bills.)
         function renderBarChart() {
             const c=document.getElementById('barChart');
-            const m=['Jul','Aug','Sep','Oct','Nov','Dec'],v=[2450,2680,2320,2890,2750,2847],mx=Math.max(...v);
-            c.innerHTML=m.map((x,i)=>`<div class="bar-group"><div class="bar-value">${formatCurrency(v[i])}</div><div class="bar" style="height:${(v[i]/mx)*150}px;background:${i===m.length-1?'var(--gradient-blue)':'linear-gradient(135deg,#2a3550,#1e2d4a)'};${i===m.length-1?'box-shadow:0 0 20px rgba(59,130,246,0.3);':''}"></div><div class="bar-label">${x}</div></div>`).join('');
+            const now=new Date(), months=[];
+            for (let i=5;i>=0;i--) {
+                const d=new Date(now.getFullYear(), now.getMonth()-i, 1);
+                months.push({ label: monthNames[d.getMonth()].slice(0,3), total: bfBillsInMonth(d.getFullYear(), d.getMonth()).reduce((s,b)=>s+(b.amount||0),0) });
+            }
+            const mx=Math.max(1, ...months.map(x=>x.total));
+            c.innerHTML=months.map((x,i)=>`<div class="bar-group"><div class="bar-value">${formatCurrency(x.total)}</div><div class="bar" style="height:${(x.total/mx)*150}px;background:${i===months.length-1?'var(--gradient-blue)':'linear-gradient(135deg,#2a3550,#1e2d4a)'};${i===months.length-1?'box-shadow:0 0 20px rgba(59,130,246,0.3);':''}"></div><div class="bar-label">${x.label}</div></div>`).join('');
         }
+        // "Spending by Category" for the CURRENT month — the same basis as the
+        // cards above it — and the centre total is this chart's own sum, so the
+        // legend and the number can never disagree. Guards the divide-by-zero
+        // when the month has no bills.
         function renderDonutChart() {
             const svg=document.querySelector('#donutChart svg');
-            const cats={};bills.forEach(b=>{cats[b.category]=(cats[b.category]||0)+b.amount;});
+            const now=new Date();
+            const cats={};bfBillsInMonth(now.getFullYear(), now.getMonth()).forEach(b=>{cats[b.category]=(cats[b.category]||0)+(b.amount||0);});
             const total=Object.values(cats).reduce((s,v)=>s+v,0),circ=2*Math.PI*60;
+            document.getElementById('donutTotal').textContent=formatCurrency(total);
+            if (!total) {
+                svg.innerHTML=`<circle cx="80" cy="80" r="60" stroke="#2a3550" stroke-dasharray="377 377" opacity="0.3"/>`;
+                document.getElementById('categoryLegend').innerHTML='<p style="color:var(--text-muted);font-size:13px;padding:8px 0;">No bills this month.</p>';
+                return;
+            }
             let off=0,circs='';
             Object.entries(cats).sort((a,b)=>b[1]-a[1]).forEach(([cat,amt])=>{const p=amt/total,d=p*circ,col=colorMap[categoryConfig[cat]?.color]||'#64748b';circs+=`<circle cx="80" cy="80" r="60" stroke="${col}" stroke-dasharray="${d} ${circ-d}" stroke-dashoffset="${-off}" style="transition:all 0.8s ease;"/>`;off+=d;});
             svg.innerHTML=`<circle cx="80" cy="80" r="60" stroke="#2a3550" stroke-dasharray="377 377" opacity="0.3"/>`+circs;
@@ -2056,13 +2131,21 @@
             saveBudgetsToStorage(budgets);closeBudgetEditModal();renderBudget();showToast('Budget allocation updated!','success');
         }
 
+        // 12-month projection: each month's REAL scheduled total (monthly bills
+        // plus any yearly bill landing in that month). This used to multiply the
+        // total by a random 0.9–1.1 factor, so the figures changed on every
+        // render and never matched the bills.
         function renderForecast() {
             const c=document.getElementById('forecastChart'),now=new Date(),months=[],values=[];
-            for(let i=0;i<12;i++){const d=new Date(now.getFullYear(),now.getMonth()+i,1);months.push(d.toLocaleString('default',{month:'short'}));values.push(Math.round((bfMonthlyRecurringTotal()+bfYearlyTotalForMonth(d.getMonth()))*(0.9+Math.random()*0.2)));}
-            const mx=Math.max(...values);
+            for(let i=0;i<12;i++){
+                const d=new Date(now.getFullYear(),now.getMonth()+i,1);
+                months.push(d.toLocaleString('default',{month:'short'}));
+                values.push(bfBillsInMonth(d.getFullYear(),d.getMonth()).reduce((s,b)=>s+(b.amount||0),0));
+            }
+            const mx=Math.max(1,...values);
             c.innerHTML=months.map((m,i)=>`<div class="bar-group"><div class="bar-value">${formatCurrency(values[i])}</div><div class="bar" style="height:${(values[i]/mx)*190}px;background:${i>0?'linear-gradient(135deg,rgba(139,92,246,0.6),rgba(139,92,246,0.3))':'var(--gradient-purple)'};${i>0?'opacity:0.7;border:1px dashed rgba(139,92,246,0.3);':''}"></div><div class="bar-label">${m}</div></div>`).join('');
-            document.getElementById('nextMonthTotal').textContent=formatCurrency(values[1]);
-            document.getElementById('threeMonthAvg').textContent=formatCurrency(values.slice(0,3).reduce((s,v)=>s+v,0)/3);
+            document.getElementById('nextMonthTotal').textContent=formatCurrency(values[1]||0);
+            document.getElementById('threeMonthAvg').textContent=formatCurrency((values.slice(0,3).reduce((s,v)=>s+v,0))/3);
             document.getElementById('yearlySavings').textContent=formatCurrency(bills.filter(b=>b.category==='subscriptions').reduce((s,b)=>s+b.amount,0)*12*0.2);
         }
 
@@ -2295,8 +2378,8 @@
             let activity = getAllAccountActivity(account.id);
             if (activityYear !== 'all') activity = activity.filter(r => (r.date || '').slice(0, 4) === activityYear);
             if (activityMonth !== 'all') activity = activity.filter(r => (r.date || '').slice(5, 7) === String(activityMonth).padStart(2, '0'));
-            const q = activitySearch.trim().toLowerCase();
-            if (q) activity = activity.filter(r => ((r.label || '') + ' ' + (r.note || '')).toLowerCase().includes(q));
+            const q = activitySearch.trim();
+            if (q) activity = activity.filter(r => bfMatchesQuery(bfActivitySearchHaystack(r), q));
             if (activitySort === 'date') activity.sort((a, b) => (a.date < b.date ? 1 : -1));
             else activity.sort((a, b) => b.amount - a.amount);
             activity.forEach((r, i) => { r._i = i; });
@@ -4171,12 +4254,14 @@
         let tagExistFilter = '';   // live filter for the "Link to existing bill" picker
         // Label for one bill in the picker. Shows the bill's OWN amount — never
         // planBillRemaining(), which is 0 for any bill already marked paid (so
-        // every settled bill used to read "$0/mo"). The cadence follows the
+        // every settled bill used to read "$0/mo") — plus its due date, so two
+        // similarly priced bills can be told apart. The cadence follows the
         // bill's monthly/yearly setting, and the raw bank description is shown
         // too when it differs from the title, to make the right bill obvious.
         function tagBillOptionLabel(b) {
             const cadence = billIsYearly(b) ? '/yr' : '/mo';
-            let label = `${billTitle(b)} — ${formatCurrency(b.amount || 0)}${cadence}`;
+            const due = b.dueDate ? ` · due ${formatDate(b.dueDate)}` : '';
+            let label = `${billTitle(b)} — ${formatCurrency(b.amount || 0)}${cadence}${due}`;
             const raw = String(b.name || '');
             if (raw && raw !== billTitle(b)) label += ` · ${raw.length > 34 ? raw.slice(0, 33) + '…' : raw}`;
             return label;
@@ -4184,10 +4269,10 @@
         function renderTagExistOptions() {
             const sel = document.getElementById('tagExistSelect');
             if (!sel) return;
-            const q = tagExistFilter.trim().toLowerCase();
+            const q = tagExistFilter.trim();
             const list = bills.slice()
                 .sort((a, b) => billTitle(a).localeCompare(billTitle(b)))
-                .filter(b => !q || (billTitle(b) + ' ' + (b.name || '') + ' ' + (b.category || '')).toLowerCase().includes(q));
+                .filter(b => !q || bfMatchesQuery(tagBillOptionLabel(b) + ' ' + (b.category || '') + ' ' + bfAmountTerms(b.amount), tagExistFilter));
             const prev = sel.value;
             sel.innerHTML = list.length
                 ? list.map(b => `<option value="${b.id}">${bfEscapeHtml(tagBillOptionLabel(b))}</option>`).join('')
@@ -4467,9 +4552,10 @@
             for (let i = 11; i >= 0; i--) {
                 const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
                 months.push(d.toLocaleString('default', { month: 'short' }));
-                values.push(Math.round((bfMonthlyRecurringTotal() + bfYearlyTotalForMonth(d.getMonth())) * (0.85 + Math.random() * 0.3)));
+                // Real billed totals per month (was a random 0.85–1.15 fudge).
+                values.push(bfBillsInMonth(d.getFullYear(), d.getMonth()).reduce((s, b) => s + (b.amount || 0), 0));
             }
-            const mx = Math.max(...values);
+            const mx = Math.max(1, ...values);
             c.innerHTML = months.map((m, i) => `<div class="bar-group"><div class="bar-value">${formatCurrency(values[i])}</div><div class="bar" style="height:${(values[i] / mx) * 220}px;background:${i === months.length - 1 ? 'var(--gradient-blue)' : 'linear-gradient(135deg,rgba(59,130,246,0.6),rgba(59,130,246,0.3))'};${i === months.length - 1 ? 'box-shadow:0 0 20px rgba(59,130,246,0.3);' : ''}"></div><div class="bar-label">${m}</div></div>`).join('');
         }
 
