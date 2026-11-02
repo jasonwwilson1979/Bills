@@ -705,7 +705,7 @@ class TemplateScriptTests(TestCase):
                        'let tagRawName', "tagNewName').value = ''",
                        "h=['Name','Title','Amount'",
                        'function bfBillForRow(',
-                       'const explicit = bills.find(b => b.matchKey && b.matchKey === key);',
+                       'const explicit = bills.filter(b => b.matchKey && b.matchKey === key);',
                        "bfMatchKey(b.name || '')"):
             self.assertIn(needle, html)
         # Title used across the board: bill rows, calendar, savings, debts,
@@ -858,8 +858,11 @@ class TemplateScriptTests(TestCase):
             html = fh.read()
         for needle in ('function bfBillForRow(', 'function bankLooseMatchEnabled(',
                        'id="bankLooseMatch"', 'onchange="bankUpdatePreview()"',
-                       "const explicit = bills.find(b => b.matchKey && b.matchKey === key);",
-                       "const named = bills.find(b => { const nk = bfMatchKey(b.name || ''); return nk && nk === key; });",
+                       "const explicit = bills.filter(b => b.matchKey && b.matchKey === key);",
+                       "const named = bills.filter(b => { const nk = bfMatchKey(b.name || ''); return nk && nk === key; });",
+                       'if (named.length > 1) return null;',
+                       'if (explicit.length > 1) return null;',
+                       'function keyBillCount(',
                        'nk.length >= 5 && key.indexOf(nk) !== -1',
                        'function bfDropSupersededDebit(',
                        'function bankAutoLinkEnabled(', 'function bankRowBill(',
@@ -930,6 +933,34 @@ class TemplateScriptTests(TestCase):
         self.assertIn("bdm.addEventListener('click'", html)
         self.assertIn('openBillDetail', html)
 
+    def test_bill_payments_can_be_unlinked_and_relinked(self):
+        """A wrong link (bad auto-match or a manual link to the wrong bill) can
+        be fixed from the bills view: every payment in the details modal can be
+        unlinked (it becomes a plain bank transaction again) or relinked (unlink
+        + reopen the bill picker on the existing-bill tab). Account Activity
+        offers the same unlink on linked rows."""
+        from django.conf import settings
+
+        path = os.path.join(str(settings.BASE_DIR), 'templates', 'tracker', 'app.html')
+        with open(path, encoding='utf-8') as fh:
+            html = fh.read()
+        for needle in ('function detachPaymentToBank(',
+                       'function unlinkBillPayment(', 'function relinkBillPayment(',
+                       'function unlinkActivityRow(',
+                       'onclick="unlinkBillPayment(${b.id}, ${pIdx})"',
+                       'onclick="relinkBillPayment(${b.id}, ${pIdx})"',
+                       'onclick="unlinkActivityRow(${r._i})"',
+                       'const allPays = (b.payments || []);',
+                       'const pIdx = allPays.indexOf(p);',
+                       'acc.debits.push(deb);',
+                       "openTagBillModal(idx);",
+                       "setTagMode('existing', document.getElementById('tagModeExistBtn'));"):
+            self.assertIn(needle, html)
+        # Detaching reverts the bill like Unpay does (status + payoff).
+        self.assertIn("if (!bill.payments.length) bill.status = 'pending';", html)
+        self.assertIn("if (bill.isPayoff) bill.paidAmount = Math.max(0, (bill.paidAmount || 0) - (p.amount || 0));", html)
+
+
     def test_bank_match_key_keeps_account_tokens_but_ignores_volatile_parts(self):
         """The match key drops dates and long number runs (phone, SEQ#, check
         numbers) so one bill matches every month, but keeps digits that are part
@@ -945,9 +976,12 @@ class TemplateScriptTests(TestCase):
                        "t = t.replace(/\\b\\d{1,2}\\/\\d{1,2}(\\/\\d{2,4})?\\b/g, ' ');",
                        "t = t.replace(/[a-z0-9]+/g, tok => (/^\\d{3,}$/.test(tok) ? ' ' : tok));",
                        'const key = bfMatchKey(raw);',
-                       "const legacyTag = bills.find(b => b.matchKey && b.matchKey === legacy && !bfMatchKey(b.name || ''));",
+                       "const legacyTag = bills.filter(b => b.matchKey && b.matchKey === legacy && !bfMatchKey(b.name || ''));",
                        "const sig = b.matchKey || bfMatchKey(b.name || '');",
-                       'r.matchKey || bfMatchKey(r.note || r.label)',
+                       'r.matchKey || bfMatchKey(bankRowRawDesc(r) || r.label)',
+                       "t = t.replace(/^#\\S+\\s*·\\s*/, ' ');",
+                       'function bankRowRawDesc(',
+                       'function keyBillCount(',
                        'Match keys found in this file',
                        '<th>Match key</th>',
                        "bfMatchKey(r.desc || r.note) || '—'",

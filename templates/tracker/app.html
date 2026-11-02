@@ -2349,7 +2349,7 @@
                             <div style="width:32px;height:32px;border-radius:var(--radius-sm);background:${isIn ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)'};display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="fas ${isIn ? 'fa-arrow-down' : 'fa-arrow-up'}" style="font-size:11px;color:${isIn ? 'var(--accent-green)' : 'var(--accent-red)'};"></i></div>
                             <div style="min-width:0;"><div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${bfEscapeHtml(r.label)}</div><div style="font-size:11px;color:var(--text-muted);">${formatDate(r.date)}${r.note && r.note !== r.label ? ' · ' + bfEscapeHtml(r.note) : ''}${!isIn && cat ? ` · <span class="category-tag ${cat.class}">${cat.label}</span>` : ''}</div></div>
                         </div>
-                        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;"><div style="text-align:right;"><div style="font-size:14px;font-weight:700;color:${isIn ? 'var(--accent-green)' : 'var(--text-primary)'};">${isIn ? '+' : '-'}${formatCurrency(r.amount)}</div><div style="font-size:10px;color:var(--text-muted);">${r.source === 'deposit' ? 'Deposit' : r.source === 'bank' ? 'Bank transaction' : 'Bill payment'}</div></div>${r.source === 'bank' ? `<button class="btn btn-secondary btn-sm" onclick="openTagBillModal(${r._i})" title="Tag as bill"><i class="fas fa-tag"></i></button>` : ''}</div>
+                        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;"><div style="text-align:right;"><div style="font-size:14px;font-weight:700;color:${isIn ? 'var(--accent-green)' : 'var(--text-primary)'};">${isIn ? '+' : '-'}${formatCurrency(r.amount)}</div><div style="font-size:10px;color:var(--text-muted);">${r.source === 'deposit' ? 'Deposit' : r.source === 'bank' ? 'Bank transaction' : 'Bill payment'}</div></div>${r.source === 'bank' ? `<button class="btn btn-secondary btn-sm" onclick="openTagBillModal(${r._i})" title="Tag as bill"><i class="fas fa-tag"></i></button>` : ''}${r.source === 'bill' ? `<button class="btn btn-secondary btn-sm" onclick="unlinkActivityRow(${r._i})" title="Unlink — remove from its bill and keep it as a bank transaction"><i class="fas fa-link-slash"></i></button>` : ''}</div>
                     </div>`;
                 });
                 html += '</div>';
@@ -2428,6 +2428,23 @@
             saveData(); renderAll();
             renderActivityDateFilters(); renderWithdrawalsList();
             showToast(`Deleted ${rows.length} transaction${rows.length === 1 ? '' : 's'}.`, 'success');
+        }
+        // Unlink a linked payment straight from Account Activity: the row stops
+        // being a bill payment and becomes a plain bank transaction again (the
+        // Tag-as-bill button then appears on it), so a wrong link is one click
+        // to fix. The bill reverts like Unpay; account balances do not change.
+        function unlinkActivityRow(idx) {
+            if (viewOnlyMode()) { showToast('👁️ View-only access.', 'info'); return; }
+            const r = (currentActivityRows || [])[idx];
+            if (!r || r.source !== 'bill' || !r._bill || !r._pay) return;
+            const pIdx = (r._bill.payments || []).indexOf(r._pay);
+            if (pIdx === -1) return;
+            const acc = accounts.find(a => a.id === r._pay.accountId);
+            if (!confirm(`Unlink ${formatCurrency(r.amount)} on ${formatDate(r.date)} from "${billTitle(r._bill)}"?\n\nIt is removed from that bill and kept as a plain bank transaction${acc ? ' on ' + acc.name : ''}, so you can tag it to the right bill. Account balances are not changed.`)) return;
+            const res = detachPaymentToBank(r._bill, pIdx);
+            saveData(); renderAll();
+            renderActivityDateFilters(); renderWithdrawalsList();
+            showToast(res ? `Unlinked — now a bank transaction on ${res.acc.name}.` : `Unlinked from "${billTitle(r._bill)}".`, 'success');
         }
         function clearAccountTransactions() {
             if (viewOnlyMode()) { showToast('👁️ View-only access.', 'info'); return; }
@@ -3197,7 +3214,8 @@
             const stLabel = st.charAt(0).toUpperCase() + st.slice(1);
             const occ = planOccurrence(b);
             const dueDate = (occ && occ.date) || b.dueDate;
-            const payments = (b.payments || []).slice().sort((x, y) => (x.date < y.date ? 1 : -1));
+            const allPays = (b.payments || []);
+            const payments = allPays.slice().sort((x, y) => (x.date < y.date ? 1 : -1));
             const totalPaid = payments.reduce((s, p) => s + (p.amount || 0), 0);
             const accName = pid => { const a = accounts.find(x => x.id === pid); return a ? a.name : 'Unknown account'; };
             const orig = new Date((b.dueDate || '') + 'T00:00:00');
@@ -3243,14 +3261,19 @@
             const summary = payments.length
                 ? `${payments.length} payment${payments.length === 1 ? '' : 's'} · <b>${formatCurrency(totalPaid)}</b> total · ${formatDate(payments[payments.length - 1].date)} → ${formatDate(payments[0].date)} · avg ${formatCurrency(totalPaid / payments.length)}`
                 : 'No payments recorded yet.';
-            const history = payments.length ? payments.map(p => `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;background:var(--bg-input);border-radius:var(--radius-sm);margin-bottom:6px;">
+            const history = payments.length ? payments.map(p => { const pIdx = allPays.indexOf(p); return `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;background:var(--bg-input);border-radius:var(--radius-sm);margin-bottom:6px;">
                     <div style="min-width:0;"><div style="font-size:13px;font-weight:600;">${formatDate(p.date)}</div><div style="font-size:11px;color:var(--text-muted);">${bfEscapeHtml(accName(p.accountId))}${p.note ? ' · ' + bfEscapeHtml(p.note) : ''}</div></div>
                     <div style="font-weight:700;white-space:nowrap;">${formatCurrency(p.amount)}</div>
-                </div>`).join('')
+                    <div style="display:flex;gap:6px;flex-shrink:0;">
+                        <button class="btn btn-secondary btn-sm" onclick="relinkBillPayment(${b.id}, ${pIdx})" title="Relink — move this payment to a different bill"><i class="fas fa-tag"></i></button>
+                        <button class="btn btn-secondary btn-sm" onclick="unlinkBillPayment(${b.id}, ${pIdx})" title="Unlink — remove from this bill and keep it as a bank transaction"><i class="fas fa-link-slash"></i></button>
+                    </div>
+                </div>`; }).join('')
                 : `<p style="color:var(--text-muted);font-size:13px;padding:6px 0;">Pay this bill and every payment will show up here with its date, amount and account.</p>`;
             const historyHtml = `<div style="margin-top:18px;">
                 <div class="settings-section-title" style="margin-bottom:8px;">Payment history</div>
                 <div style="font-size:12.5px;color:var(--text-secondary);margin-bottom:10px;">${summary}</div>
+                ${payments.length ? '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:10px;"><i class="fas fa-tag"></i> relink this payment to another bill · <i class="fas fa-link-slash"></i> unlink it (removes it from this bill and keeps it as a bank transaction)</div>' : ''}
                 ${yearLines ? `<div style="margin-bottom:12px;padding:10px 12px;background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-sm);">${yearLines}</div>` : ''}
                 ${history}
             </div>`;
@@ -3262,6 +3285,56 @@
             if (payments.length) actions.push(`<button class="btn btn-secondary" onclick="closeBillDetail();openUnpayModal(${b.id})"><i class="fas fa-undo"></i> Unpay last</button>`);
             actions.push(`<button class="btn btn-primary" onclick="closeBillDetail();editBill(${b.id})"><i class="fas fa-pen"></i> Edit bill</button>`);
             document.getElementById('billDetailActions').innerHTML = actions.join('');
+        }
+
+        // ============ UNLINK / RELINK A PAYMENT ============
+        // A payment can end up on the wrong bill (a bad auto-link, or a manual
+        // link to the wrong bill). Detaching it re-creates it as a plain bank
+        // transaction on the same account so it can be re-tagged, and reverts
+        // the bill's status/payoff like Unpay does. Account balances are left
+        // alone on purpose: the money already left the account — only the link
+        // was wrong.
+        function detachPaymentToBank(bill, pIdx) {
+            if (!bill || !bill.payments || !bill.payments[pIdx]) return null;
+            const p = bill.payments.splice(pIdx, 1)[0];
+            if (bill.isPayoff) bill.paidAmount = Math.max(0, (bill.paidAmount || 0) - (p.amount || 0));
+            if (!bill.payments.length) bill.status = 'pending';
+            const acc = accounts.find(a => a.id === p.accountId);
+            if (!acc) return null;
+            acc.debits = acc.debits || [];
+            const note = (p.note && p.note !== 'Bank transaction') ? p.note : ('Unlinked from ' + billTitle(bill));
+            const deb = { date: p.date, amount: p.amount, note: note };
+            acc.debits.push(deb);
+            return { acc: acc, deb: deb, payment: p };
+        }
+        function unlinkBillPayment(billId, pIdx) {
+            if (viewOnlyMode()) { showToast('👁️ View-only access.', 'info'); return; }
+            const bill = bills.find(b => b.id === billId);
+            if (!bill || !bill.payments || !bill.payments[pIdx]) return;
+            const p = bill.payments[pIdx];
+            const acc = accounts.find(a => a.id === p.accountId);
+            if (!confirm(`Unlink ${formatCurrency(p.amount)} on ${formatDate(p.date)} from "${billTitle(bill)}"?\n\nIt is removed from this bill and kept as a plain bank transaction${acc ? ' on ' + acc.name : ''}, so you can tag it to the right bill from Account Activity. Account balances are not changed.`)) return;
+            const res = detachPaymentToBank(bill, pIdx);
+            saveData(); renderAll(); renderBillDetail();
+            showToast(res ? `Unlinked — kept as a bank transaction on ${res.acc.name}.` : `Unlinked from "${billTitle(bill)}".`, 'success');
+        }
+        function relinkBillPayment(billId, pIdx) {
+            if (viewOnlyMode()) { showToast('👁️ View-only access.', 'info'); return; }
+            const bill = bills.find(b => b.id === billId);
+            if (!bill || !bill.payments || !bill.payments[pIdx]) return;
+            const p = bill.payments[pIdx];
+            if (!confirm(`Relink ${formatCurrency(p.amount)} on ${formatDate(p.date)} from "${billTitle(bill)}"?\n\nIt is removed from this bill and reopened as a bank transaction so you can choose the correct bill.`)) return;
+            const res = detachPaymentToBank(bill, pIdx);
+            saveData(); renderAll();
+            closeBillDetail();
+            if (!res) { showToast('That payment had no account, so it was removed from the bill.', 'info'); return; }
+            // Drop the user straight into the picker for the reopened row.
+            openWithdrawalsModal(res.acc.id);
+            const idx = (currentActivityRows || []).findIndex(row => row._deb === res.deb);
+            if (idx === -1) { showToast('Unlinked — open Account Activity to tag it.', 'info'); return; }
+            openTagBillModal(idx);
+            setTagMode('existing', document.getElementById('tagModeExistBtn'));
+            showToast('Pick the correct bill for this transaction.', 'info');
         }
 
         // ============ BILL TAGS IN CHAT ============
@@ -3861,16 +3934,17 @@
             const keyRows = {};
             rows.forEach(r => {
                 const k = bfMatchKey(r.desc || r.note) || '(no key)';
-                keyRows[k] = keyRows[k] || { n: 0, bill: null };
+                keyRows[k] = keyRows[k] || { n: 0, bill: null, amb: 0 };
                 keyRows[k].n++;
                 if (!keyRows[k].bill) keyRows[k].bill = bankRowBill(r);
+                if (!keyRows[k].amb) keyRows[k].amb = keyBillCount(k);
             });
             const keyEntries = Object.entries(keyRows).sort((a, b) => b[1].n - a[1].n);
             const keysHtml = `<div style="margin-top:14px;">
                 <div class="settings-section-title" style="margin-bottom:6px;">Match keys found in this file</div>
-                <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:8px;">Rows sharing a key are treated as the same bill. Dates and long number runs (phone, SEQ#, check numbers) are ignored, but digits inside an account token are kept — so separate loans or accounts stay separate.</div>
+                <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:8px;">Rows sharing a key are treated as the same bill. Dates and long number runs (phone, SEQ#, check numbers) are ignored, but digits inside an account token are kept — so separate loans or accounts stay separate. A key claimed by two or more bills is left unlinked rather than guessed.</div>
                 <table class="bank-table"><thead><tr><th>Match key</th><th>Rows</th><th>Bill it pays</th></tr></thead><tbody>
-                ${keyEntries.slice(0, 12).map(([k, d]) => `<tr><td class="clip"><code style="font-size:11.5px;">${bfEscapeHtml(k)}</code></td><td>${d.n}</td><td>${d.bill ? bfEscapeHtml(billTitle(d.bill)) : '<span style="color:var(--text-muted);">no bill yet — tag one of these rows to create it</span>'}</td></tr>`).join('')}
+                ${keyEntries.slice(0, 12).map(([k, d]) => `<tr><td class="clip"><code style="font-size:11.5px;">${bfEscapeHtml(k)}</code></td><td>${d.n}</td><td>${d.bill ? bfEscapeHtml(billTitle(d.bill)) : (d.amb > 1 ? `<span style="color:var(--accent-orange);">${d.amb} bills share this key — won't auto-link; tag a row by hand</span>` : '<span style="color:var(--text-muted);">no bill yet — tag one of these rows to create it</span>')}</td></tr>`).join('')}
                 </tbody></table>
                 ${keyEntries.length > 12 ? `<p style="font-size:11px;color:var(--text-muted);margin:6px 0 0;">…and ${keyEntries.length - 12} more key(s).</p>` : ''}
             </div>`;
@@ -3978,6 +4052,7 @@
         //      -> affirmcompaymeaffirmcomsto7l8l7m0t5e3   (different loan, different key)
         function bfMatchKey(s) {
             let t = String(s == null ? '' : s).toLowerCase();
+            t = t.replace(/^#\S+\s*·\s*/, ' ');                     // "#1234 · " check/ref prefix
             t = t.replace(/\d{4}-\d{1,2}-\d{1,2}/g, ' ');          // ISO dates
             t = t.replace(/\b\d{1,2}\/\d{1,2}(\/\d{2,4})?\b/g, ' '); // 10/09, 10/09/26
             t = t.replace(/[a-z0-9]+/g, tok => (/^\d{3,}$/.test(tok) ? ' ' : tok)); // long number runs
@@ -3993,20 +4068,38 @@
         //      no key of its own — so a precise Name always wins,
         //   4) (opt-in) exactly one bill whose Name key (5+ chars) appears
         //      inside the row's key.
+        // AMBIGUITY RULE: if any step matches MORE THAN ONE bill the row is left
+        // unlinked (returns null) instead of paying whichever bill happens to be
+        // first. Descriptions that differ only by a dropped store/account number
+        // ("CAPITAL ONE 4521" / "CAPITAL ONE 8890") collapse to one key, and
+        // silently paying the wrong bill is far worse than paying none — the
+        // preview flags those keys and the row can be tagged by hand.
         function bfBillForRow(desc, note, loose) {
             const raw = String(desc || note || '');
             const key = bfMatchKey(raw);
             const legacy = descMatchKey(raw);
             if (!key && !legacy) return null;
-            const named = bills.find(b => { const nk = bfMatchKey(b.name || ''); return nk && nk === key; });
-            if (named) return named;
-            const explicit = bills.find(b => b.matchKey && b.matchKey === key);
-            if (explicit) return explicit;
-            const legacyTag = bills.find(b => b.matchKey && b.matchKey === legacy && !bfMatchKey(b.name || ''));
-            if (legacyTag) return legacyTag;
+            const named = bills.filter(b => { const nk = bfMatchKey(b.name || ''); return nk && nk === key; });
+            if (named.length === 1) return named[0];
+            if (named.length > 1) return null;                     // ambiguous — never guess
+            const explicit = bills.filter(b => b.matchKey && b.matchKey === key);
+            if (explicit.length === 1) return explicit[0];
+            if (explicit.length > 1) return null;                  // ambiguous — never guess
+            const legacyTag = bills.filter(b => b.matchKey && b.matchKey === legacy && !bfMatchKey(b.name || ''));
+            if (legacyTag.length === 1) return legacyTag[0];
             if (!loose || !key) return null;
             const cands = bills.filter(b => { const nk = bfMatchKey(b.name || ''); return nk.length >= 5 && key.indexOf(nk) !== -1; });
             return cands.length === 1 ? cands[0] : null;
+        }
+        // How many bills would claim a match key. >1 means the key is ambiguous,
+        // so auto-linking skips it (see bfBillForRow). Used to flag the keys in
+        // the import preview.
+        function keyBillCount(key) {
+            if (!key || key === '(no key)') return 0;
+            return bills.filter(b => {
+                const nk = bfMatchKey(b.name || '');
+                return (nk && nk === key) || (b.matchKey && b.matchKey === key);
+            }).length;
         }
         // Auto-linking a withdrawal to a bill is an explicit opt-in per import.
         // Off by default: a statement import must never silently turn a
@@ -4063,6 +4156,14 @@
             if (bill.isPayoff) bill.paidAmount = (bill.paidAmount || 0) + r.amount;
             return p;
         }
+        // The bank description of an activity row WITHOUT the "#ref · " prefix
+        // that buildBankRows prepends to the note. A bill's Name is set to this
+        // same text, so the bill's match key must be derived from it too — using
+        // r.note (which still carries the ref) could store a key that never
+        // matches a future import, and the bill would silently stop auto-linking.
+        function bankRowRawDesc(r) {
+            return String((r && (r.note || r.label)) || '').replace(/^#\S+\s*·\s*/, '').trim();
+        }
         let tagRowIndex = null;
         let tagMode = 'new';
         let tagAccId = null;
@@ -4107,9 +4208,9 @@
             document.getElementById('tagBillDesc').textContent = r.label;
             document.getElementById('tagBillDate').textContent = formatDate(r.date);
             document.getElementById('tagBillAmount').textContent = formatCurrency(r.amount);
-            const mk = r.matchKey || bfMatchKey(r.note || r.label);
+            const mk = r.matchKey || bfMatchKey(bankRowRawDesc(r) || r.label);
             document.getElementById('tagBillMatchKey').textContent = mk ? `"${mk}"` : '(description)';
-            tagRawName = String(r.label || '').replace(/^#\S+\s*·\s*/, '').trim();
+            tagRawName = bankRowRawDesc(r);
             document.getElementById('tagNewName').value = '';
             document.getElementById('tagNewAmount').value = r.amount;
             document.getElementById('tagNewCategory').innerHTML = Object.entries(categoryConfig).map(([k, c]) => `<option value="${k}">${bfEscapeHtml(c.label)}</option>`).join('');
@@ -4135,7 +4236,7 @@
             if (viewOnlyMode()) { showToast('👁️ View-only access.', 'info'); return; }
             const acc = accounts.find(a => a.id === tagAccId); if (!acc) return;
             const r = (currentActivityRows || [])[tagRowIndex]; if (!r) return;
-            const mk = r.matchKey || bfMatchKey(r.note || r.label);
+            const mk = r.matchKey || bfMatchKey(bankRowRawDesc(r) || r.label);
             let msg;
             if (tagMode === 'existing') {
                 const bill = bills.find(b => b.id === parseInt(document.getElementById('tagExistSelect').value));
