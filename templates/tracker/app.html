@@ -1714,7 +1714,7 @@
         function renderDashboardBills() {
             const c=document.getElementById('billsListContainer');
             let f=currentFilter==='all'?[...bills]:bills.filter(b=>billNowStatus(b)===currentFilter);
-            f.sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate)); f=f.slice(0,8);
+            f.sort((a,b)=>bfCompareProjectedDate(a,b)); f=f.slice(0,8);
             c.innerHTML=f.length?f.map(b=>renderBillRow(b)).join(''):`<div class="empty-state"><i class="fas fa-file-invoice"></i><h3>No bills found</h3><p>Add your first bill!</p></div>`;
         }
 
@@ -1820,12 +1820,16 @@
             return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
         }
 
-        function getProjectedDueDate(bill) {
+        // A bill's occurrence in the month being viewed, as an ISO date. refDate
+        // defaults to the Bills-page month (billsViewDate); the calendar passes
+        // its own month rather than mutating that global.
+        function getProjectedDueDate(bill, refDate) {
             if (!bill.recurring) return bill.dueDate;
             const origDate = new Date(bill.dueDate + 'T00:00:00');
             if (isNaN(origDate.getTime())) return bill.dueDate;
             let day = origDate.getDate();
-            const viewDate = new Date(billsViewDate.getFullYear(), billsViewDate.getMonth(), 1);
+            const ref = refDate || billsViewDate;
+            const viewDate = new Date(ref.getFullYear(), ref.getMonth(), 1);
             if (bill.yearly && origDate.getMonth() !== viewDate.getMonth()) {
                 // Yearly bill viewed outside its month: show the next anniversary.
                 const now = new Date();
@@ -1836,6 +1840,21 @@
             day = Math.min(day, lastDayOfMonth);
             viewDate.setDate(day);
             return bfIsoDate(viewDate);
+        }
+
+        // Earliest → latest by the date each row actually SHOWS — the bill's
+        // occurrence in the month being viewed — with the title as a stable
+        // tiebreaker. Sorting on the raw anchor dueDate made the list look
+        // unordered: a monthly bill anchored on the 5th displays the 5th of the
+        // viewed month, so its position had nothing to do with the date shown.
+        // Both dates are ISO 'YYYY-MM-DD' strings, so comparing them as strings
+        // is chronological and timezone-safe.
+        function bfCompareProjectedDate(a, b, refDate) {
+            const da = getProjectedDueDate(a, refDate) || '';
+            const db = getProjectedDueDate(b, refDate) || '';
+            if (da < db) return -1;
+            if (da > db) return 1;
+            return billTitle(a).localeCompare(billTitle(b));
         }
 
         // Effective status of a bill's occurrence in a given month. Recurring
@@ -1962,8 +1981,8 @@
                 return matchFilter && matchSearch;
             });
 
-            if (currentSort === 'date') f.sort((a,b) => new Date(a.dueDate) - new Date(b.dueDate));
-            else if (currentSort === 'amount') f.sort((a,b) => b.amount - a.amount);
+            if (currentSort === 'date') f.sort((a,b) => bfCompareProjectedDate(a, b, billsViewDate));
+            else if (currentSort === 'amount') f.sort((a,b) => (b.amount||0) - (a.amount||0) || bfCompareProjectedDate(a, b, billsViewDate));
             else f.sort((a,b) => billTitle(a).localeCompare(billTitle(b)));
 
             // Render month summary
@@ -2083,7 +2102,7 @@
             const fd=new Date(y,m,1).getDay(),dim=new Date(y,m+1,0).getDate(),dip=new Date(y,m,0).getDate();
             let h=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d=>`<div class="calendar-header-cell">${d}</div>`).join('');
             for(let i=fd-1;i>=0;i--)h+=`<div class="calendar-cell other-month"><div class="calendar-date">${dip-i}</div></div>`;
-            for(let d=1;d<=dim;d++){const ds=`${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`,it=today.getFullYear()===y&&today.getMonth()===m&&today.getDate()===d,db=bills.filter(b=>{billsViewDate=calendarDate;const projDate=getProjectedDueDate(b);return projDate===ds;});h+=`<div class="calendar-cell${it?' today':''}"><div class="calendar-date">${d}</div>${db.map(b=>{const c=categoryConfig[b.category]||categoryConfig.other;const bt=bfEscapeHtml(billTitle(b));return `<div class="calendar-bill ${c.color}" onclick="editBill(${b.id})" title="${bt}">${bt}</div>`;}).join('')}</div>`;}
+            for(let d=1;d<=dim;d++){const ds=`${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`,it=today.getFullYear()===y&&today.getMonth()===m&&today.getDate()===d,db=bills.filter(b=>getProjectedDueDate(b, calendarDate)===ds);h+=`<div class="calendar-cell${it?' today':''}"><div class="calendar-date">${d}</div>${db.map(b=>{const c=categoryConfig[b.category]||categoryConfig.other;const bt=bfEscapeHtml(billTitle(b));return `<div class="calendar-bill ${c.color}" onclick="editBill(${b.id})" title="${bt}">${bt}</div>`;}).join('')}</div>`;}
             const tc=fd+dim,rem=(7-(tc%7))%7;for(let i=1;i<=rem;i++)h+=`<div class="calendar-cell other-month"><div class="calendar-date">${i}</div></div>`;
             g.innerHTML=h;
         }

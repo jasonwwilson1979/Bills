@@ -1016,6 +1016,34 @@ class TemplateScriptTests(TestCase):
         self.assertIn('Search anything', html)
 
 
+    def test_all_bills_sorts_by_the_date_shown(self):
+        """'By Date' orders bills earliest→latest by the date each row actually
+        shows — its occurrence in the month being viewed — instead of the bill's
+        original anchor date. Rendering the calendar also no longer overwrites
+        the Bills-page month, which used to make the list render (and project
+        dates into) the calendar's month."""
+        from django.conf import settings
+
+        path = os.path.join(str(settings.BASE_DIR), 'templates', 'tracker', 'app.html')
+        with open(path, encoding='utf-8') as fh:
+            html = fh.read()
+        for needle in ('function bfCompareProjectedDate(',
+                       'function getProjectedDueDate(bill, refDate)',
+                       'const ref = refDate || billsViewDate;',
+                       "if (currentSort === 'date') f.sort((a,b) => bfCompareProjectedDate(a, b, billsViewDate));",
+                       'f.sort((a,b)=>bfCompareProjectedDate(a,b));',
+                       'getProjectedDueDate(b, calendarDate)',
+                       "return billTitle(a).localeCompare(billTitle(b));"):
+            self.assertIn(needle, html)
+        # The calendar must never mutate the Bills-page month again.
+        self.assertNotIn('billsViewDate=calendarDate', html)
+        self.assertNotIn('billsViewDate = calendarDate', html)
+        # Sorting no longer uses the raw anchor due date, which ignored the
+        # month being viewed.
+        self.assertNotIn('f.sort((a,b) => new Date(a.dueDate) - new Date(b.dueDate));', html)
+        self.assertNotIn('f.sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate));', html)
+
+
     def test_bank_match_key_keeps_account_tokens_but_ignores_volatile_parts(self):
         """The match key drops dates and long number runs (phone, SEQ#, check
         numbers) so one bill matches every month, but keeps digits that are part
